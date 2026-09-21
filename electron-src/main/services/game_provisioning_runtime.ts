@@ -11,6 +11,7 @@ import {
   getCurrentOBSSceneCollectionName,
   getOBSScenesForSceneSwitcher,
   getWindowTitleFromSource,
+  isOBSProvisioningNotReadyError,
   suggestWindowSceneSwitcherRule,
 } from "../ui/obs.js";
 import type { ObsSceneCaptureWindowSelection } from "../ui/obs-capture.js";
@@ -38,6 +39,31 @@ export type GameCaptureTargetResolver = (
 function sameName(left: string, right: string): boolean {
   return (
     left.trim().toLocaleLowerCase() === right.trim().toLocaleLowerCase()
+  );
+}
+
+async function withProvisioningOBSReadiness<T>(
+  operation: string,
+  action: () => Promise<T>
+): Promise<T> {
+  try {
+    return await action();
+  } catch (error) {
+    if (isOBSProvisioningNotReadyError(error)) {
+      throw new GameProvisioningNotReadyError(
+        operation +
+          " is not ready yet: " +
+          (error instanceof Error ? error.message : String(error))
+      );
+    }
+    throw error;
+  }
+}
+
+async function getProvisioningOBSScenes(): Promise<ProvisioningScene[]> {
+  return withProvisioningOBSReadiness(
+    "OBS scene enumeration",
+    getOBSScenesForSceneSwitcher
   );
 }
 
@@ -72,7 +98,10 @@ function requireReadyWindowSceneSwitcherCollection(
 }
 
 async function getReadyActiveCollection(): Promise<WindowSceneSwitcherCollection> {
-  const collectionName = await getCurrentOBSSceneCollectionName();
+  const collectionName = await withProvisioningOBSReadiness(
+    "OBS scene collection lookup",
+    getCurrentOBSSceneCollectionName
+  );
   if (!collectionName) {
     throw new GameProvisioningNotReadyError(
       "OBS did not report an active scene collection yet."
@@ -107,7 +136,7 @@ async function prepareExistingProvisionedScene(
 ): Promise<{ scene: ProvisioningScene; changed: boolean } | null> {
   const collection = await getReadyActiveCollection();
   const collectionName = collection.collectionName;
-  const scenes = await getOBSScenesForSceneSwitcher();
+  const scenes = await getProvisioningOBSScenes();
   const externalId = request.externalId?.trim();
   let scene: ProvisioningScene | undefined;
 
@@ -148,7 +177,10 @@ async function prepareExistingProvisionedScene(
     }
   }
 
-  const captureTitle = await getWindowTitleFromSource(scene.id);
+  const captureTitle = await withProvisioningOBSReadiness(
+    "OBS capture inspection",
+    () => getWindowTitleFromSource(scene.id)
+  );
   if (!captureTitle?.trim()) {
     throw new Error(
       `A scene named "${scene.name}" already exists but has no reusable window capture; refusing to rebuild it automatically.`
@@ -167,7 +199,10 @@ async function prepareExistingProvisionedScene(
     return { scene, changed: false };
   }
 
-  const suggestedRule = await suggestWindowSceneSwitcherRule(scene.id);
+  const suggestedRule = await withProvisioningOBSReadiness(
+    "OBS scene-switcher rule inspection",
+    () => suggestWindowSceneSwitcherRule(scene.id)
+  );
   if (!suggestedRule?.titlePattern) {
     throw new Error(
       `GSM could not derive a scene-switcher rule for existing scene "${scene.name}".`
@@ -193,7 +228,7 @@ async function createProvisionedScene(
   target: ProvisioningCaptureTarget
 ): Promise<ProvisioningScene> {
   await getReadyActiveCollection();
-  const before = await getOBSScenesForSceneSwitcher();
+  const before = await getProvisioningOBSScenes();
   if (
     before.some((candidate) =>
       sameName(candidate.name, request.displayName)
@@ -209,9 +244,12 @@ async function createProvisionedScene(
     sceneName: request.displayName,
   });
 
-  await createSceneWithCapture(selection);
+  await withProvisioningOBSReadiness(
+    "OBS scene creation",
+    () => createSceneWithCapture(selection)
+  );
 
-  const scenes = await getOBSScenesForSceneSwitcher();
+  const scenes = await getProvisioningOBSScenes();
   const createdScene = scenes.find((candidate) =>
     sameName(candidate.name, request.displayName)
   );
@@ -251,7 +289,7 @@ export function createGsmGameProvisioningDependencies(
         return;
       }
 
-      const scenes = await getOBSScenesForSceneSwitcher();
+      const scenes = await getProvisioningOBSScenes();
       const sameNameScene = scenes.find((candidate) =>
         sameName(candidate.name, request.displayName)
       );
