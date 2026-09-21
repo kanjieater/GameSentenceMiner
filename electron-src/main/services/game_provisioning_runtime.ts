@@ -58,7 +58,7 @@ function requireReadyWindowSceneSwitcherCollection(
     );
   }
   if (
-    collection.migrationVersion < WINDOW_SCENE_SWITCHER_MIGRATION_VERSION ||
+    collection.migrationVersion !== WINDOW_SCENE_SWITCHER_MIGRATION_VERSION ||
     !collection.legacySwitcherDisabled
   ) {
     throw new Error(
