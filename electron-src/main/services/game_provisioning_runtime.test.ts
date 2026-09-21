@@ -103,19 +103,45 @@ describe("GSM game provisioning runtime binding", () => {
       profile = next;
     });
     mocks.getGameProvisioningBinding.mockImplementation(
-      (externalId: string) =>
-        binding?.externalId === externalId ? binding : null
+      (externalId: string, requestedCollectionName: string) =>
+        binding?.externalId === externalId &&
+        binding?.collectionName === requestedCollectionName
+          ? binding
+          : null
     );
     mocks.getSceneLaunchProfileForScene.mockImplementation(() => profile);
     mocks.getWindowSceneSwitcherConfig.mockImplementation(
       () => switcherConfig
     );
+    mocks.reserveGameProvisioningBinding.mockImplementation(
+      (
+        externalId: string,
+        requestedCollectionName: string,
+        sceneName: string
+      ) => {
+        if (!binding) {
+          binding = {
+            externalId,
+            collectionName: requestedCollectionName,
+            sceneId: "",
+            sceneName,
+            pending: true,
+          };
+        }
+      }
+    );
     mocks.upsertGameProvisioningBinding.mockImplementation(
-      (externalId: string, boundScene: { id: string; name: string }) => {
+      (
+        externalId: string,
+        requestedCollectionName: string,
+        boundScene: { id: string; name: string }
+      ) => {
         binding = {
           externalId,
+          collectionName: requestedCollectionName,
           sceneId: boundScene.id,
           sceneName: boundScene.name,
+          pending: false,
         };
       }
     );
@@ -291,6 +317,7 @@ describe("GSM game provisioning runtime binding", () => {
     scenes = [renamedScene];
     binding = {
       externalId: externalRequest.externalId,
+      collectionName: "Default",
       sceneId: scene.id,
       sceneName: scene.name,
     };
@@ -328,6 +355,7 @@ describe("GSM game provisioning runtime binding", () => {
     expect(resolver).not.toHaveBeenCalled();
     expect(mocks.upsertGameProvisioningBinding).toHaveBeenCalledWith(
       externalRequest.externalId,
+      "Default",
       renamedScene
     );
   });
@@ -336,6 +364,7 @@ describe("GSM game provisioning runtime binding", () => {
     scenes = [scene];
     binding = {
       externalId: "playnite:arc-the-lad-ii",
+      collectionName: "Default",
       sceneId: scene.id,
       sceneName: scene.name,
     };
@@ -525,6 +554,7 @@ describe("GSM game provisioning runtime binding", () => {
     });
     expect(mocks.upsertGameProvisioningBinding).toHaveBeenCalledWith(
       externalRequest.externalId,
+      "Default",
       scene
     );
   });
