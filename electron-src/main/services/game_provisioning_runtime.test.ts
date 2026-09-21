@@ -144,7 +144,7 @@ describe("GSM game provisioning runtime binding", () => {
 
     const result = await ensureGameProvisionedWithGsm(request, resolver);
 
-    expect(result.status).toBe("already-configured");
+    expect(result.status).toBe("provisioned");
     expect(resolver).not.toHaveBeenCalled();
     expect(upsertGeneratedWindowSceneRule).toHaveBeenCalledWith(
       "Default",
