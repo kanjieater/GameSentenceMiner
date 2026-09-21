@@ -89,6 +89,15 @@ export interface GameProvisioningDependencies {
   ): Promise<ProvisioningSceneProfile | null>;
 
   upsertSceneLaunchProfile(profile: ProvisioningSceneProfile): Promise<void> | void;
+
+  /**
+   * Persist or refresh durable caller identity for this scene. Implementations
+   * should no-op when the request has no externalId.
+   */
+  rememberProvisionedScene(
+    request: GameProvisioningRequest,
+    scene: ProvisioningScene
+  ): Promise<void> | void;
 }
 
 function buildGenericAutoOcrProfile(
@@ -151,6 +160,10 @@ export async function ensureGameProvisioned(
       // Provisioning may repair scene/rule plumbing, but it must not silently
       // replace explicit OCR/text-hook choices.
       if (existingProfile) {
+        await dependencies.rememberProvisionedScene(
+          normalizedRequest,
+          existingScene
+        );
         return {
           status: existingState.changed ? "provisioned" : "already-configured",
           scene: existingScene,
@@ -161,6 +174,10 @@ export async function ensureGameProvisioned(
 
       await dependencies.upsertSceneLaunchProfile(
         buildGenericAutoOcrProfile(existingScene)
+      );
+      await dependencies.rememberProvisionedScene(
+        normalizedRequest,
+        existingScene
       );
 
       return {
@@ -206,6 +223,10 @@ export async function ensureGameProvisioned(
         buildGenericAutoOcrProfile(createdScene)
       );
     }
+    await dependencies.rememberProvisionedScene(
+      normalizedRequest,
+      createdScene
+    );
 
     return {
       status: "provisioned",
