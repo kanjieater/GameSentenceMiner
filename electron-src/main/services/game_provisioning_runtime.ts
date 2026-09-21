@@ -1,6 +1,8 @@
 import {
+  getGameProvisioningBinding,
   getSceneLaunchProfileForScene,
   getWindowSceneSwitcherConfig,
+  upsertGameProvisioningBinding,
   upsertSceneLaunchProfile,
 } from "../store.js";
 import {
@@ -100,11 +102,34 @@ async function prepareExistingProvisionedScene(
   request: GameProvisioningRequest
 ): Promise<{ scene: ProvisioningScene; changed: boolean } | null> {
   const scenes = await getOBSScenesForSceneSwitcher();
-  const scene = scenes.find((candidate) =>
-    sameName(candidate.name, request.displayName)
-  );
-  if (!scene) {
-    return null;
+  const externalId = request.externalId?.trim();
+  let scene: ProvisioningScene | undefined;
+
+  if (externalId) {
+    const binding = getGameProvisioningBinding(externalId);
+    if (binding) {
+      scene = scenes.find((candidate) => candidate.id === binding.sceneId);
+      if (!scene) {
+        return null;
+      }
+    } else {
+      const sameNameScene = scenes.find((candidate) =>
+        sameName(candidate.name, request.displayName)
+      );
+      if (sameNameScene) {
+        throw new Error(
+          `A scene named "${sameNameScene.name}" already exists but is not bound to external id "${externalId}"; refusing to claim or modify it automatically.`
+        );
+      }
+      return null;
+    }
+  } else {
+    scene = scenes.find((candidate) =>
+      sameName(candidate.name, request.displayName)
+    );
+    if (!scene) {
+      return null;
+    }
   }
 
   const captureTitle = await getWindowTitleFromSource(scene.id);
@@ -138,8 +163,7 @@ async function prepareExistingProvisionedScene(
 
   upsertGeneratedWindowSceneRule(
     collectionName,
-    collection?.collectionFileName ??
-      `${collectionName.replace(/\\s+/g, "_")}.json`,
+    collection.collectionFileName,
     {
       sceneUuid: scene.id,
       sceneName: scene.name,
@@ -198,6 +222,12 @@ export function createGsmGameProvisioningDependencies(
       getSceneLaunchProfileForScene(scene) as ProvisioningSceneProfile | null,
     upsertSceneLaunchProfile: async (profile) => {
       upsertSceneLaunchProfile(profile);
+    },
+    rememberProvisionedScene: async (request, scene) => {
+      const externalId = request.externalId?.trim();
+      if (externalId) {
+        upsertGameProvisioningBinding(externalId, scene);
+      }
     },
   };
 }
