@@ -1724,6 +1724,14 @@ function isOBSInitializingError(error: unknown): boolean {
     return false;
 }
 
+export function isOBSProvisioningNotReadyError(error: unknown): boolean {
+    if (isOBSInitializingError(error) || isOBSTimeoutError(error)) {
+        return true;
+    }
+    const message = getObsErrorMessage(error).toLowerCase();
+    return message.includes('not connected');
+}
+
 function withTimeout<T>(
     operation: string,
     timeoutMs: number,
