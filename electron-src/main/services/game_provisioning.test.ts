@@ -179,7 +179,7 @@ describe("game provisioning core", () => {
     expect(dependencies.upsertSceneLaunchProfile).not.toHaveBeenCalled();
   });
 
-  it("preserves unrelated automation settings when only auto OCR is missing", async () => {
+  it("preserves an existing user-owned Game Automation profile unchanged", async () => {
     const existingProfile = autoOcrProfile({
       textHookMode: "textractor",
       ocrMode: "none",
@@ -195,15 +195,32 @@ describe("game provisioning core", () => {
     const result = await ensureGameProvisioned(request, dependencies);
 
     expect(result).toEqual({
+      status: "already-configured",
+      scene,
+      createdScene: false,
+      updatedProfile: false,
+    });
+    expect(dependencies.resolveCaptureTarget).not.toHaveBeenCalled();
+    expect(dependencies.upsertSceneLaunchProfile).not.toHaveBeenCalled();
+  });
+
+  it("adds the generic auto-OCR profile when an existing compatible scene has none", async () => {
+    const dependencies = makeDependencies({
+      prepareExistingProvisionedScene: vi.fn(async () => ({ scene, changed: false })),
+      getSceneLaunchProfile: vi.fn(async () => null),
+    });
+
+    const result = await ensureGameProvisioned(request, dependencies);
+
+    expect(result).toEqual({
       status: "provisioned",
       scene,
       createdScene: false,
       updatedProfile: true,
     });
     expect(dependencies.resolveCaptureTarget).not.toHaveBeenCalled();
-    expect(dependencies.upsertSceneLaunchProfile).toHaveBeenCalledWith({
-      ...existingProfile,
-      ocrMode: "auto",
-    });
+    expect(dependencies.upsertSceneLaunchProfile).toHaveBeenCalledWith(
+      autoOcrProfile()
+    );
   });
 });
