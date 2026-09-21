@@ -160,6 +160,12 @@ interface FrontPageState {
     ocrConfigs?: OCRGame[];
 }
 
+export interface GameProvisioningBinding {
+    externalId: string;
+    sceneId: string;
+    sceneName: string;
+}
+
 interface StoreConfig {
     frontPageState: FrontPageState;
     yuzu: YuzuConfig;
@@ -169,6 +175,7 @@ interface StoreConfig {
     textractorPath32: string;
     lunaTranslatorPath: string;
     sceneLaunchProfiles: SceneLaunchProfile[];
+    gameProvisioningBindings: GameProvisioningBinding[];
     sceneLaunchProfilesMigrated: boolean;
     sceneLaunchAgentScriptsMigrated: boolean;
     startConsoleMinimized: boolean;
@@ -232,6 +239,7 @@ export const store = new Store<StoreConfig>({
         textractorPath32: "",
         lunaTranslatorPath: "",
         sceneLaunchProfiles: [],
+        gameProvisioningBindings: [],
         sceneLaunchProfilesMigrated: false,
         sceneLaunchAgentScriptsMigrated: false,
         startConsoleMinimized: false,
@@ -932,6 +940,43 @@ export function getWindowSceneSwitcherConfig(): WindowSceneSwitcherConfig {
 
 export function setWindowSceneSwitcherConfig(config: WindowSceneSwitcherConfig): void {
     store.set("windowSceneSwitcher", config);
+}
+
+export function getGameProvisioningBinding(externalId: string): GameProvisioningBinding | null {
+    const normalizedExternalId = (externalId ?? "").trim();
+    if (!normalizedExternalId) {
+        return null;
+    }
+    const bindings = store.get("gameProvisioningBindings", []);
+    return bindings.find((binding) => binding.externalId === normalizedExternalId) ?? null;
+}
+
+export function upsertGameProvisioningBinding(
+    externalId: string,
+    scene: ObsScene
+): void {
+    const normalizedExternalId = (externalId ?? "").trim();
+    const sceneId = (scene?.id ?? "").trim();
+    const sceneName = (scene?.name ?? "").trim();
+    if (!normalizedExternalId || !sceneId || !sceneName) {
+        return;
+    }
+
+    const bindings = store.get("gameProvisioningBindings", []);
+    const next: GameProvisioningBinding = {
+        externalId: normalizedExternalId,
+        sceneId,
+        sceneName,
+    };
+    const index = bindings.findIndex(
+        (binding) => binding.externalId === normalizedExternalId
+    );
+    if (index >= 0) {
+        bindings[index] = next;
+    } else {
+        bindings.push(next);
+    }
+    store.set("gameProvisioningBindings", bindings);
 }
 
 export function getSceneLaunchProfiles(): SceneLaunchProfile[] {
