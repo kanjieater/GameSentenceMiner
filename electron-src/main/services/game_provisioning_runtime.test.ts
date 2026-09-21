@@ -414,7 +414,7 @@ describe("GSM game provisioning runtime binding", () => {
     expect(mocks.createSceneWithCapture).not.toHaveBeenCalled();
   });
 
-  it("fails closed when the active collection has no switcher migration state", async () => {
+  it("reports target-not-ready when the active collection migration state has not appeared yet", async () => {
     switcherConfig = {
       schemaVersion: 1,
       collections: [],
