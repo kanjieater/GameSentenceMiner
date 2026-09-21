@@ -162,7 +162,7 @@ describe("GSM game provisioning runtime binding", () => {
 
     expect(result.status).toBe("already-configured");
     expect(resolver).not.toHaveBeenCalled();
-    expect(createSceneWithCapture).not.toHaveBeenCalled();
+    expect(mocks.createSceneWithCapture).not.toHaveBeenCalled();
   });
 
   it("repairs a missing generated rule for a compatible existing capture", async () => {
@@ -199,7 +199,7 @@ describe("GSM game provisioning runtime binding", () => {
 
     expect(result.status).toBe("provisioned");
     expect(resolver).not.toHaveBeenCalled();
-    expect(upsertGeneratedWindowSceneRule).toHaveBeenCalledWith(
+    expect(mocks.upsertGeneratedWindowSceneRule).toHaveBeenCalledWith(
       "Default",
       "Default.json",
       {
@@ -209,7 +209,7 @@ describe("GSM game provisioning runtime binding", () => {
         executableName: "retroarch.exe",
       }
     );
-    expect(createSceneWithCapture).not.toHaveBeenCalled();
+    expect(mocks.createSceneWithCapture).not.toHaveBeenCalled();
   });
 
   it("fails closed instead of re-enabling a user-disabled rule", async () => {
@@ -254,7 +254,7 @@ describe("GSM game provisioning runtime binding", () => {
       })
     );
     expect(resolver).not.toHaveBeenCalled();
-    expect(createSceneWithCapture).not.toHaveBeenCalled();
+    expect(mocks.createSceneWithCapture).not.toHaveBeenCalled();
   });
 
   it("fails closed on an unbound same-name scene when external identity is supplied", async () => {
@@ -280,8 +280,8 @@ describe("GSM game provisioning runtime binding", () => {
       })
     );
     expect(resolver).not.toHaveBeenCalled();
-    expect(createSceneWithCapture).not.toHaveBeenCalled();
-    expect(upsertSceneLaunchProfile).not.toHaveBeenCalled();
+    expect(mocks.createSceneWithCapture).not.toHaveBeenCalled();
+    expect(mocks.upsertSceneLaunchProfile).not.toHaveBeenCalled();
   });
 
   it("follows an external-id binding across a scene rename", async () => {
@@ -324,7 +324,7 @@ describe("GSM game provisioning runtime binding", () => {
 
     expect(result.status).toBe("already-configured");
     expect(resolver).not.toHaveBeenCalled();
-    expect(upsertGameProvisioningBinding).toHaveBeenCalledWith(
+    expect(mocks.upsertGameProvisioningBinding).toHaveBeenCalledWith(
       externalRequest.externalId,
       renamedScene
     );
@@ -373,7 +373,7 @@ describe("GSM game provisioning runtime binding", () => {
 
     expect(result.status).toBe("already-configured");
     expect(resolver).not.toHaveBeenCalled();
-    expect(createSceneWithCapture).not.toHaveBeenCalled();
+    expect(mocks.createSceneWithCapture).not.toHaveBeenCalled();
   });
 
   it("fails closed when the active collection has no switcher migration state", async () => {
@@ -398,7 +398,7 @@ describe("GSM game provisioning runtime binding", () => {
         reason: expect.stringContaining("no GSM scene-switcher migration state"),
       })
     );
-    expect(createSceneWithCapture).not.toHaveBeenCalled();
+    expect(mocks.createSceneWithCapture).not.toHaveBeenCalled();
   });
 
   it("fails closed when the active collection has a stale migration version", async () => {
@@ -421,12 +421,12 @@ describe("GSM game provisioning runtime binding", () => {
         reason: expect.stringContaining("not migration-ready"),
       })
     );
-    expect(createSceneWithCapture).not.toHaveBeenCalled();
+    expect(mocks.createSceneWithCapture).not.toHaveBeenCalled();
   });
 
   it("fails closed when strict OBS scene enumeration fails", async () => {
     scenes = [scene];
-    getOBSScenesForSceneSwitcher.mockRejectedValueOnce(
+    mocks.getOBSScenesForSceneSwitcher.mockRejectedValueOnce(
       new Error("OBS scene enumeration failed")
     );
     const resolver = vi.fn(async () => ({
@@ -444,7 +444,7 @@ describe("GSM game provisioning runtime binding", () => {
       status: "failed",
       reason: "OBS scene enumeration failed",
     });
-    expect(createSceneWithCapture).not.toHaveBeenCalled();
+    expect(mocks.createSceneWithCapture).not.toHaveBeenCalled();
   });
 
   it("uses the existing Setup Capture default and creates a new auto-OCR scene", async () => {
@@ -477,7 +477,7 @@ describe("GSM game provisioning runtime binding", () => {
       createdScene: true,
       updatedProfile: true,
     });
-    expect(createSceneWithCapture).toHaveBeenCalledWith({
+    expect(mocks.createSceneWithCapture).toHaveBeenCalledWith({
       title: "Arc the Lad II - RetroArch",
       sceneName: "Arc the Lad II",
       targetKind: "window",
@@ -489,7 +489,7 @@ describe("GSM game provisioning runtime binding", () => {
           "Arc the Lad II - RetroArch:Qt6QWindowIcon:retroarch.exe",
       },
     });
-    expect(upsertSceneLaunchProfile).toHaveBeenCalledWith({
+    expect(mocks.upsertSceneLaunchProfile).toHaveBeenCalledWith({
       sceneId: scene.id,
       sceneName: scene.name,
       textHookMode: "none",
@@ -498,7 +498,7 @@ describe("GSM game provisioning runtime binding", () => {
       agentScriptPath: "",
       launchDelaySeconds: 0,
     });
-    expect(upsertGameProvisioningBinding).toHaveBeenCalledWith(
+    expect(mocks.upsertGameProvisioningBinding).toHaveBeenCalledWith(
       externalRequest.externalId,
       scene
     );
