@@ -11,6 +11,10 @@ import {
   suggestWindowSceneSwitcherRule,
 } from "../ui/obs.js";
 import type { ObsSceneCaptureWindowSelection } from "../ui/obs-capture.js";
+import {
+  WINDOW_SCENE_SWITCHER_MIGRATION_VERSION,
+  type WindowSceneSwitcherCollection,
+} from "../../shared/window_scene_switcher.js";
 import { upsertGeneratedWindowSceneRule } from "./window_scene_switcher.js";
 import {
   ensureGameProvisioned,
@@ -31,6 +35,44 @@ function sameName(left: string, right: string): boolean {
   return (
     left.trim().toLocaleLowerCase() === right.trim().toLocaleLowerCase()
   );
+}
+
+function requireReadyWindowSceneSwitcherCollection(
+  collectionName: string
+): WindowSceneSwitcherCollection {
+  const config = getWindowSceneSwitcherConfig();
+  const collection = config.collections.find(
+    (candidate) => candidate.collectionName === collectionName
+  );
+
+  if (!collection) {
+    throw new Error(
+      `OBS collection "${collectionName}" has no GSM scene-switcher migration state; refusing to provision until migration completes.`
+    );
+  }
+  if (!collection.enabled) {
+    throw new Error(
+      `Scene switching is disabled for OBS collection "${collectionName}"; refusing to override that setting.`
+    );
+  }
+  if (
+    collection.migrationVersion < WINDOW_SCENE_SWITCHER_MIGRATION_VERSION ||
+    !collection.legacySwitcherDisabled
+  ) {
+    throw new Error(
+      `Scene switching for OBS collection "${collectionName}" is not migration-ready.`
+    );
+  }
+
+  return collection;
+}
+
+async function getReadyActiveCollection(): Promise<WindowSceneSwitcherCollection> {
+  const collectionName = await getCurrentOBSSceneCollectionName();
+  if (!collectionName) {
+    throw new Error("OBS did not report an active scene collection.");
+  }
+  return requireReadyWindowSceneSwitcherCollection(collectionName);
 }
 
 function chooseSetupCaptureMode(
@@ -72,28 +114,10 @@ async function prepareExistingProvisionedScene(
     );
   }
 
-  const collectionName = await getCurrentOBSSceneCollectionName();
-  if (!collectionName) {
-    throw new Error("OBS did not report an active scene collection.");
-  }
+  const collection = await getReadyActiveCollection();
+  const collectionName = collection.collectionName;
 
-  const config = getWindowSceneSwitcherConfig();
-  const collection = config.collections.find(
-    (candidate) => candidate.collectionName === collectionName
-  );
-
-  if (collection && !collection.enabled) {
-    throw new Error(
-      `Scene switching is disabled for OBS collection "${collectionName}"; refusing to override that setting.`
-    );
-  }
-  if (collection && !collection.legacySwitcherDisabled) {
-    throw new Error(
-      `Scene switching for OBS collection "${collectionName}" is not migration-ready.`
-    );
-  }
-
-  const existingRule = collection?.rules.find(
+  const existingRule = collection.rules.find(
     (candidate) => candidate.sceneUuid === scene.id
   );
   if (existingRule) {
@@ -131,6 +155,7 @@ async function createProvisionedScene(
   request: GameProvisioningRequest,
   target: ProvisioningCaptureTarget
 ): Promise<ProvisioningScene> {
+  await getReadyActiveCollection();
   const before = await getOBSScenesForSceneSwitcher();
   if (
     before.some((candidate) =>
