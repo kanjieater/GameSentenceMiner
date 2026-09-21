@@ -3,13 +3,26 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { GameProvisioningRequest } from "./game_provisioning.js";
 
 const scene = { id: "scene-arc", name: "Arc the Lad II" };
+function readySwitcherConfig(rules: any[] = []) {
+  return {
+    schemaVersion: 1,
+    collections: [
+      {
+        collectionName: "Default",
+        collectionFileName: "Default.json",
+        enabled: true,
+        migrationVersion: 1,
+        legacySwitcherDisabled: true,
+        rules,
+      },
+    ],
+  };
+}
+
 let scenes: Array<{ id: string; name: string }> = [];
 let profile: any = null;
 let collectionName = "Default";
-let switcherConfig: any = {
-  schemaVersion: 1,
-  collections: [],
-};
+let switcherConfig: any = readySwitcherConfig();
 
 const getOBSScenesForSceneSwitcher = vi.fn(async () => scenes);
 const createSceneWithCapture = vi.fn(async () => {
@@ -57,10 +70,7 @@ describe("GSM game provisioning runtime binding", () => {
     scenes = [];
     profile = null;
     collectionName = "Default";
-    switcherConfig = {
-      schemaVersion: 1,
-      collections: [],
-    };
+    switcherConfig = readySwitcherConfig();
     getOBSScenesForSceneSwitcher.mockReset();
     getOBSScenesForSceneSwitcher.mockImplementation(async () => scenes);
     createSceneWithCapture.mockClear();
@@ -204,6 +214,54 @@ describe("GSM game provisioning runtime binding", () => {
       })
     );
     expect(resolver).not.toHaveBeenCalled();
+    expect(createSceneWithCapture).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when the active collection has no switcher migration state", async () => {
+    switcherConfig = {
+      schemaVersion: 1,
+      collections: [],
+    };
+    const resolver = vi.fn(async () => ({
+      status: "resolved" as const,
+      target: {
+        title: "Arc the Lad II - RetroArch",
+        selection: { title: "Arc the Lad II - RetroArch" },
+      },
+    }));
+    const { ensureGameProvisionedWithGsm } = await loadRuntime();
+
+    const result = await ensureGameProvisionedWithGsm(request, resolver);
+
+    expect(result.status).toBe("failed");
+    expect(result).toEqual(
+      expect.objectContaining({
+        reason: expect.stringContaining("no GSM scene-switcher migration state"),
+      })
+    );
+    expect(createSceneWithCapture).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when the active collection has a stale migration version", async () => {
+    switcherConfig = readySwitcherConfig();
+    switcherConfig.collections[0].migrationVersion = 0;
+    const resolver = vi.fn(async () => ({
+      status: "resolved" as const,
+      target: {
+        title: "Arc the Lad II - RetroArch",
+        selection: { title: "Arc the Lad II - RetroArch" },
+      },
+    }));
+    const { ensureGameProvisionedWithGsm } = await loadRuntime();
+
+    const result = await ensureGameProvisionedWithGsm(request, resolver);
+
+    expect(result.status).toBe("failed");
+    expect(result).toEqual(
+      expect.objectContaining({
+        reason: expect.stringContaining("not migration-ready"),
+      })
+    );
     expect(createSceneWithCapture).not.toHaveBeenCalled();
   });
 
