@@ -21,6 +21,7 @@ import {
 import { upsertGeneratedWindowSceneRule } from "./window_scene_switcher.js";
 import {
   ensureGameProvisioned,
+  GameProvisioningNotReadyError,
   type CaptureTargetResolution,
   type GameProvisioningDependencies,
   type GameProvisioningRequest,
@@ -49,8 +50,8 @@ function requireReadyWindowSceneSwitcherCollection(
   );
 
   if (!collection) {
-    throw new Error(
-      `OBS collection "${collectionName}" has no GSM scene-switcher migration state; refusing to provision until migration completes.`
+    throw new GameProvisioningNotReadyError(
+      `OBS collection "${collectionName}" has no GSM scene-switcher migration state yet.`
     );
   }
   if (!collection.enabled) {
@@ -73,7 +74,9 @@ function requireReadyWindowSceneSwitcherCollection(
 async function getReadyActiveCollection(): Promise<WindowSceneSwitcherCollection> {
   const collectionName = await getCurrentOBSSceneCollectionName();
   if (!collectionName) {
-    throw new Error("OBS did not report an active scene collection.");
+    throw new GameProvisioningNotReadyError(
+      "OBS did not report an active scene collection yet."
+    );
   }
   return requireReadyWindowSceneSwitcherCollection(collectionName);
 }
