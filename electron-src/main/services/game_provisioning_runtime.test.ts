@@ -11,6 +11,7 @@ let switcherConfig: any = {
   collections: [],
 };
 
+const getOBSScenesForSceneSwitcher = vi.fn(async () => scenes);
 const createSceneWithCapture = vi.fn(async () => {
   scenes = [scene];
 });
@@ -25,7 +26,7 @@ const upsertSceneLaunchProfile = vi.fn((next: any) => {
 
 vi.mock("../ui/obs.js", () => ({
   createSceneWithCapture,
-  getOBSScenes: vi.fn(async () => scenes),
+  getOBSScenesForSceneSwitcher,
   getCurrentOBSSceneCollectionName: vi.fn(async () => collectionName),
   getWindowTitleFromSource: vi.fn(async () => "Arc the Lad II - RetroArch"),
   suggestWindowSceneSwitcherRule,
@@ -60,6 +61,8 @@ describe("GSM game provisioning runtime binding", () => {
       schemaVersion: 1,
       collections: [],
     };
+    getOBSScenesForSceneSwitcher.mockReset();
+    getOBSScenesForSceneSwitcher.mockImplementation(async () => scenes);
     createSceneWithCapture.mockClear();
     suggestWindowSceneSwitcherRule.mockClear();
     upsertGeneratedWindowSceneRule.mockClear();
@@ -201,6 +204,28 @@ describe("GSM game provisioning runtime binding", () => {
       })
     );
     expect(resolver).not.toHaveBeenCalled();
+    expect(createSceneWithCapture).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when strict OBS scene enumeration fails", async () => {
+    getOBSScenesForSceneSwitcher.mockRejectedValueOnce(
+      new Error("OBS scene enumeration failed")
+    );
+    const resolver = vi.fn(async () => ({
+      status: "resolved" as const,
+      target: {
+        title: "Arc the Lad II - RetroArch",
+        selection: { title: "Arc the Lad II - RetroArch" },
+      },
+    }));
+    const { ensureGameProvisionedWithGsm } = await loadRuntime();
+
+    const result = await ensureGameProvisionedWithGsm(request, resolver);
+
+    expect(result).toEqual({
+      status: "failed",
+      reason: "OBS scene enumeration failed",
+    });
     expect(createSceneWithCapture).not.toHaveBeenCalled();
   });
 
