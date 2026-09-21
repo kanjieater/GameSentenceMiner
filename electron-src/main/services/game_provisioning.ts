@@ -91,6 +91,14 @@ export interface GameProvisioningDependencies {
   upsertSceneLaunchProfile(profile: ProvisioningSceneProfile): Promise<void> | void;
 
   /**
+   * Persist a recoverable ownership reservation before creating a new scene.
+   * Implementations should no-op when the request has no externalId.
+   */
+  reserveProvisioning(
+    request: GameProvisioningRequest
+  ): Promise<void> | void;
+
+  /**
    * Persist or refresh durable caller identity for this scene. Implementations
    * should no-op when the request has no externalId.
    */
@@ -153,6 +161,14 @@ export async function ensureGameProvisioned(
 
     if (existingState) {
       const existingScene = existingState.scene;
+
+      // Finalize a pending durable identity before any later fallible profile
+      // work so retries can always recognize integration-owned state.
+      await dependencies.rememberProvisionedScene(
+        normalizedRequest,
+        existingScene
+      );
+
       const existingProfile =
         await dependencies.getSceneLaunchProfile(existingScene);
 
@@ -160,10 +176,6 @@ export async function ensureGameProvisioned(
       // Provisioning may repair scene/rule plumbing, but it must not silently
       // replace explicit OCR/text-hook choices.
       if (existingProfile) {
-        await dependencies.rememberProvisionedScene(
-          normalizedRequest,
-          existingScene
-        );
         return {
           status: existingState.changed ? "provisioned" : "already-configured",
           scene: existingScene,
@@ -174,10 +186,6 @@ export async function ensureGameProvisioned(
 
       await dependencies.upsertSceneLaunchProfile(
         buildGenericAutoOcrProfile(existingScene)
-      );
-      await dependencies.rememberProvisionedScene(
-        normalizedRequest,
-        existingScene
       );
 
       return {
@@ -210,10 +218,23 @@ export async function ensureGameProvisioned(
       };
     }
 
+    // Reserve durable ownership before the first scene mutation. If any later
+    // write fails, a retry can safely recognize and finish this provisioning
+    // attempt instead of treating its own same-name scene as a user collision.
+    await dependencies.reserveProvisioning(normalizedRequest);
+
     const createdScene = await dependencies.createSceneWithCapture(
       normalizedRequest,
       resolution.target
     );
+
+    // Finalize the durable identity before profile mutation so profile failures
+    // remain recoverable on the next call.
+    await dependencies.rememberProvisionedScene(
+      normalizedRequest,
+      createdScene
+    );
+
     const existingProfile =
       await dependencies.getSceneLaunchProfile(createdScene);
     const needsProfileUpdate = existingProfile === null;
@@ -223,10 +244,6 @@ export async function ensureGameProvisioned(
         buildGenericAutoOcrProfile(createdScene)
       );
     }
-    await dependencies.rememberProvisionedScene(
-      normalizedRequest,
-      createdScene
-    );
 
     return {
       status: "provisioned",
