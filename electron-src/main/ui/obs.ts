@@ -2096,7 +2096,7 @@ async function isOBSHealthy(): Promise<boolean> {
 }
 
 // Shared scene creation logic
-async function createSceneWithCapture(window: ObsSceneCaptureWindowSelection): Promise<void> {
+export async function createSceneWithCapture(window: ObsSceneCaptureWindowSelection): Promise<void> {
     if (!isWindows() && !isLinux()) {
         throw new Error(
             'Automatic OBS capture setup is currently only supported on Windows and Linux XComposite or PipeWire.'
