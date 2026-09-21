@@ -57,6 +57,7 @@ function makeDependencies(
     createSceneWithCapture: vi.fn(async () => scene),
     getSceneLaunchProfile: vi.fn(async () => null),
     upsertSceneLaunchProfile: vi.fn(async () => undefined),
+    rememberProvisionedScene: vi.fn(async () => undefined),
     ...overrides,
   };
 }
