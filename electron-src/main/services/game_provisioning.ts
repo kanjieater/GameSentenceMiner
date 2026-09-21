@@ -1,5 +1,12 @@
 import type { ObsSceneCaptureWindowSelection } from "../ui/obs-capture.js";
 
+export class GameProvisioningNotReadyError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "GameProvisioningNotReadyError";
+  }
+}
+
 export interface GameProvisioningRequest {
   displayName: string;
   processId?: number;
@@ -123,6 +130,13 @@ function buildGenericAutoOcrProfile(
 }
 
 function failed(reason: unknown): GameProvisioningResult {
+  if (reason instanceof GameProvisioningNotReadyError) {
+    return {
+      status: "target-not-ready",
+      reason: reason.message,
+    };
+  }
+
   return {
     status: "failed",
     reason: reason instanceof Error ? reason.message : String(reason),
