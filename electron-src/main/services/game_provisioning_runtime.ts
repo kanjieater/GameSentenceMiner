@@ -6,7 +6,7 @@ import {
 import {
   createSceneWithCapture,
   getCurrentOBSSceneCollectionName,
-  getOBSScenes,
+  getOBSScenesForSceneSwitcher,
   getWindowTitleFromSource,
   suggestWindowSceneSwitcherRule,
 } from "../ui/obs.js";
@@ -57,7 +57,7 @@ function chooseSetupCaptureMode(
 async function prepareExistingProvisionedScene(
   request: GameProvisioningRequest
 ): Promise<{ scene: ProvisioningScene; changed: boolean } | null> {
-  const scenes = await getOBSScenes();
+  const scenes = await getOBSScenesForSceneSwitcher();
   const scene = scenes.find((candidate) =>
     sameName(candidate.name, request.displayName)
   );
@@ -131,7 +131,7 @@ async function createProvisionedScene(
   request: GameProvisioningRequest,
   target: ProvisioningCaptureTarget
 ): Promise<ProvisioningScene> {
-  const before = await getOBSScenes();
+  const before = await getOBSScenesForSceneSwitcher();
   if (
     before.some((candidate) =>
       sameName(candidate.name, request.displayName)
@@ -149,7 +149,7 @@ async function createProvisionedScene(
 
   await createSceneWithCapture(selection);
 
-  const scenes = await getOBSScenes();
+  const scenes = await getOBSScenesForSceneSwitcher();
   const createdScene = scenes.find((candidate) =>
     sameName(candidate.name, request.displayName)
   );
