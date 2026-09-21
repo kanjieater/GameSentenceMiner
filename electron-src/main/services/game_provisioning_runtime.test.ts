@@ -37,6 +37,7 @@ const mocks = vi.hoisted(() => ({
   getSceneLaunchProfileForScene: vi.fn(),
   getWindowSceneSwitcherConfig: vi.fn(),
   upsertGameProvisioningBinding: vi.fn(),
+  reserveGameProvisioningBinding: vi.fn(),
 }));
 
 vi.mock("../ui/obs.js", () => ({
@@ -56,6 +57,7 @@ vi.mock("../store.js", () => ({
   getSceneLaunchProfileForScene: mocks.getSceneLaunchProfileForScene,
   getWindowSceneSwitcherConfig: mocks.getWindowSceneSwitcherConfig,
   upsertGameProvisioningBinding: mocks.upsertGameProvisioningBinding,
+  reserveGameProvisioningBinding: mocks.reserveGameProvisioningBinding,
   upsertSceneLaunchProfile: mocks.upsertSceneLaunchProfile,
 }));
 
@@ -392,12 +394,35 @@ describe("GSM game provisioning runtime binding", () => {
 
     const result = await ensureGameProvisionedWithGsm(request, resolver);
 
-    expect(result.status).toBe("failed");
+    expect(result.status).toBe("target-not-ready");
     expect(result).toEqual(
       expect.objectContaining({
-        reason: expect.stringContaining("no GSM scene-switcher migration state"),
+        reason: expect.stringContaining("no GSM scene-switcher migration state yet"),
       })
     );
+    expect(mocks.createSceneWithCapture).not.toHaveBeenCalled();
+  });
+
+  it("reports target-not-ready before OBS exposes an active collection", async () => {
+    collectionName = "";
+    const resolver = vi.fn(async () => ({
+      status: "resolved" as const,
+      target: {
+        title: "Arc the Lad II - RetroArch",
+        selection: { title: "Arc the Lad II - RetroArch" },
+      },
+    }));
+    const { ensureGameProvisionedWithGsm } = await loadRuntime();
+
+    const result = await ensureGameProvisionedWithGsm(request, resolver);
+
+    expect(result.status).toBe("target-not-ready");
+    expect(result).toEqual(
+      expect.objectContaining({
+        reason: expect.stringContaining("active scene collection yet"),
+      })
+    );
+    expect(resolver).not.toHaveBeenCalled();
     expect(mocks.createSceneWithCapture).not.toHaveBeenCalled();
   });
 
