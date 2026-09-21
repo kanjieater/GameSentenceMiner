@@ -14,6 +14,11 @@ let switcherConfig: any = {
 const createSceneWithCapture = vi.fn(async () => {
   scenes = [scene];
 });
+const suggestWindowSceneSwitcherRule = vi.fn(async () => ({
+  titlePattern: ".*Arc the Lad II.*",
+  executableName: "retroarch.exe",
+}));
+const upsertGeneratedWindowSceneRule = vi.fn();
 const upsertSceneLaunchProfile = vi.fn((next: any) => {
   profile = next;
 });
@@ -23,6 +28,11 @@ vi.mock("../ui/obs.js", () => ({
   getOBSScenes: vi.fn(async () => scenes),
   getCurrentOBSSceneCollectionName: vi.fn(async () => collectionName),
   getWindowTitleFromSource: vi.fn(async () => "Arc the Lad II - RetroArch"),
+  suggestWindowSceneSwitcherRule,
+}));
+
+vi.mock("./window_scene_switcher.js", () => ({
+  upsertGeneratedWindowSceneRule,
 }));
 
 vi.mock("../store.js", () => ({
@@ -51,6 +61,8 @@ describe("GSM game provisioning runtime binding", () => {
       collections: [],
     };
     createSceneWithCapture.mockClear();
+    suggestWindowSceneSwitcherRule.mockClear();
+    upsertGeneratedWindowSceneRule.mockClear();
     upsertSceneLaunchProfile.mockClear();
   });
 
@@ -96,6 +108,98 @@ describe("GSM game provisioning runtime binding", () => {
     const result = await ensureGameProvisionedWithGsm(request, resolver);
 
     expect(result.status).toBe("already-configured");
+    expect(resolver).not.toHaveBeenCalled();
+    expect(createSceneWithCapture).not.toHaveBeenCalled();
+  });
+
+  it("repairs a missing generated rule for a compatible existing capture", async () => {
+    scenes = [scene];
+    profile = {
+      sceneId: scene.id,
+      sceneName: scene.name,
+      textHookMode: "none",
+      ocrMode: "auto",
+      launchOverlay: false,
+      agentScriptPath: "",
+      launchDelaySeconds: 0,
+    };
+    switcherConfig = {
+      schemaVersion: 1,
+      collections: [
+        {
+          collectionName: "Default",
+          collectionFileName: "Default.json",
+          enabled: true,
+          migrationVersion: 1,
+          legacySwitcherDisabled: true,
+          rules: [],
+        },
+      ],
+    };
+    const resolver = vi.fn(async () => ({
+      status: "not-ready" as const,
+      reason: "should not run",
+    }));
+    const { ensureGameProvisionedWithGsm } = await loadRuntime();
+
+    const result = await ensureGameProvisionedWithGsm(request, resolver);
+
+    expect(result.status).toBe("already-configured");
+    expect(resolver).not.toHaveBeenCalled();
+    expect(upsertGeneratedWindowSceneRule).toHaveBeenCalledWith(
+      "Default",
+      "Default.json",
+      {
+        sceneUuid: scene.id,
+        sceneName: scene.name,
+        titlePattern: ".*Arc the Lad II.*",
+        executableName: "retroarch.exe",
+      }
+    );
+    expect(createSceneWithCapture).not.toHaveBeenCalled();
+  });
+
+  it("fails closed instead of re-enabling a user-disabled rule", async () => {
+    scenes = [scene];
+    switcherConfig = {
+      schemaVersion: 1,
+      collections: [
+        {
+          collectionName: "Default",
+          collectionFileName: "Default.json",
+          enabled: true,
+          migrationVersion: 1,
+          legacySwitcherDisabled: true,
+          rules: [
+            {
+              sceneUuid: scene.id,
+              sceneName: scene.name,
+              titlePattern: ".*Arc the Lad II.*",
+              executableName: "retroarch.exe",
+              enabled: false,
+              source: "gsm-generated",
+            },
+          ],
+        },
+      ],
+    };
+    const resolver = vi.fn(async () => ({
+      status: "resolved" as const,
+      target: {
+        title: "Arc the Lad II - RetroArch",
+        selection: { title: "Arc the Lad II - RetroArch" },
+      },
+    }));
+    const { ensureGameProvisionedWithGsm } = await loadRuntime();
+
+    const result = await ensureGameProvisionedWithGsm(request, resolver);
+
+    expect(result.status).toBe("failed");
+    expect(result).toEqual(
+      expect.objectContaining({
+        reason: expect.stringContaining("user-disabled"),
+      })
+    );
     expect(resolver).not.toHaveBeenCalled();
     expect(createSceneWithCapture).not.toHaveBeenCalled();
   });
