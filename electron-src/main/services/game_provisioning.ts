@@ -91,31 +91,9 @@ export interface GameProvisioningDependencies {
   upsertSceneLaunchProfile(profile: ProvisioningSceneProfile): Promise<void> | void;
 }
 
-function profileAlreadyHasGenericBaseline(
-  scene: ProvisioningScene,
-  profile: ProvisioningSceneProfile | null
-): boolean {
-  return Boolean(
-    profile &&
-      profile.sceneName === scene.name &&
-      (!profile.sceneId || profile.sceneId === scene.id) &&
-      profile.ocrMode === "auto"
-  );
-}
-
 function buildGenericAutoOcrProfile(
-  scene: ProvisioningScene,
-  existing: ProvisioningSceneProfile | null
+  scene: ProvisioningScene
 ): ProvisioningSceneProfile {
-  if (existing) {
-    return {
-      ...existing,
-      sceneId: scene.id,
-      sceneName: scene.name,
-      ocrMode: "auto",
-    };
-  }
-
   return {
     sceneId: scene.id,
     sceneName: scene.name,
@@ -169,7 +147,10 @@ export async function ensureGameProvisioned(
       const existingProfile =
         await dependencies.getSceneLaunchProfile(existingScene);
 
-      if (profileAlreadyHasGenericBaseline(existingScene, existingProfile)) {
+      // Any existing Game Automation profile is user-owned configuration.
+      // Provisioning may repair scene/rule plumbing, but it must not silently
+      // replace explicit OCR/text-hook choices.
+      if (existingProfile) {
         return {
           status: existingState.changed ? "provisioned" : "already-configured",
           scene: existingScene,
@@ -179,7 +160,7 @@ export async function ensureGameProvisioned(
       }
 
       await dependencies.upsertSceneLaunchProfile(
-        buildGenericAutoOcrProfile(existingScene, existingProfile)
+        buildGenericAutoOcrProfile(existingScene)
       );
 
       return {
@@ -218,17 +199,12 @@ export async function ensureGameProvisioned(
     );
     const existingProfile =
       await dependencies.getSceneLaunchProfile(createdScene);
-    const desiredProfile = buildGenericAutoOcrProfile(
-      createdScene,
-      existingProfile
-    );
-    const needsProfileUpdate = !profileAlreadyHasGenericBaseline(
-      createdScene,
-      existingProfile
-    );
+    const needsProfileUpdate = existingProfile === null;
 
     if (needsProfileUpdate) {
-      await dependencies.upsertSceneLaunchProfile(desiredProfile);
+      await dependencies.upsertSceneLaunchProfile(
+        buildGenericAutoOcrProfile(createdScene)
+      );
     }
 
     return {
