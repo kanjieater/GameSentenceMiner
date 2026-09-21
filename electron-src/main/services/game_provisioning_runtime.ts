@@ -8,8 +8,10 @@ import {
   getCurrentOBSSceneCollectionName,
   getOBSScenes,
   getWindowTitleFromSource,
+  suggestWindowSceneSwitcherRule,
 } from "../ui/obs.js";
 import type { ObsSceneCaptureWindowSelection } from "../ui/obs-capture.js";
+import { upsertGeneratedWindowSceneRule } from "./window_scene_switcher.js";
 import {
   ensureGameProvisioned,
   type CaptureTargetResolution,
@@ -26,9 +28,9 @@ export type GameCaptureTargetResolver = (
 ) => Promise<CaptureTargetResolution>;
 
 function sameName(left: string, right: string): boolean {
-  return left.trim().localeCompare(right.trim(), undefined, {
-    sensitivity: "accent",
-  }) === 0;
+  return (
+    left.trim().toLocaleLowerCase() === right.trim().toLocaleLowerCase()
+  );
 }
 
 function chooseSetupCaptureMode(
@@ -63,25 +65,64 @@ async function prepareExistingProvisionedScene(
     return null;
   }
 
+  const captureTitle = await getWindowTitleFromSource(scene.id);
+  if (!captureTitle?.trim()) {
+    throw new Error(
+      `A scene named "${scene.name}" already exists but has no reusable window capture; refusing to rebuild it automatically.`
+    );
+  }
+
   const collectionName = await getCurrentOBSSceneCollectionName();
+  if (!collectionName) {
+    throw new Error("OBS did not report an active scene collection.");
+  }
+
   const config = getWindowSceneSwitcherConfig();
   const collection = config.collections.find(
     (candidate) => candidate.collectionName === collectionName
   );
-  const rule = collection?.rules.find(
-    (candidate) =>
-      candidate.enabled &&
-      candidate.sceneUuid === scene.id
-  );
-  if (!rule) {
-    return null;
+
+  if (collection && !collection.enabled) {
+    throw new Error(
+      `Scene switching is disabled for OBS collection "${collectionName}"; refusing to override that setting.`
+    );
+  }
+  if (collection && !collection.legacySwitcherDisabled) {
+    throw new Error(
+      `Scene switching for OBS collection "${collectionName}" is not migration-ready.`
+    );
   }
 
-  // A matching rule without an actual window capture is not fully provisioned.
-  const captureTitle = await getWindowTitleFromSource(scene.id);
-  if (!captureTitle?.trim()) {
-    return null;
+  const existingRule = collection?.rules.find(
+    (candidate) => candidate.sceneUuid === scene.id
+  );
+  if (existingRule) {
+    if (!existingRule.enabled) {
+      throw new Error(
+        `The saved scene-switcher rule for "${scene.name}" is disabled; refusing to re-enable a user-disabled rule automatically.`
+      );
+    }
+    return scene;
   }
+
+  const suggestedRule = await suggestWindowSceneSwitcherRule(scene.id);
+  if (!suggestedRule?.titlePattern) {
+    throw new Error(
+      `GSM could not derive a scene-switcher rule for existing scene "${scene.name}".`
+    );
+  }
+
+  upsertGeneratedWindowSceneRule(
+    collectionName,
+    collection?.collectionFileName ??
+      `${collectionName.replace(/\\s+/g, "_")}.json`,
+    {
+      sceneUuid: scene.id,
+      sceneName: scene.name,
+      titlePattern: suggestedRule.titlePattern,
+      executableName: suggestedRule.executableName,
+    }
+  );
 
   return scene;
 }
@@ -90,6 +131,17 @@ async function createProvisionedScene(
   request: GameProvisioningRequest,
   target: ProvisioningCaptureTarget
 ): Promise<ProvisioningScene> {
+  const before = await getOBSScenes();
+  if (
+    before.some((candidate) =>
+      sameName(candidate.name, request.displayName)
+    )
+  ) {
+    throw new Error(
+      `A scene named "${request.displayName}" already exists; refusing to rebuild its capture sources automatically.`
+    );
+  }
+
   const selection = chooseSetupCaptureMode({
     ...target.selection,
     sceneName: request.displayName,
