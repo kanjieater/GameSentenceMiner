@@ -56,7 +56,7 @@ function chooseSetupCaptureMode(
 
 async function prepareExistingProvisionedScene(
   request: GameProvisioningRequest
-): Promise<ProvisioningScene | null> {
+): Promise<{ scene: ProvisioningScene; changed: boolean } | null> {
   const scenes = await getOBSScenes();
   const scene = scenes.find((candidate) =>
     sameName(candidate.name, request.displayName)
@@ -102,7 +102,7 @@ async function prepareExistingProvisionedScene(
         `The saved scene-switcher rule for "${scene.name}" is disabled; refusing to re-enable a user-disabled rule automatically.`
       );
     }
-    return scene;
+    return { scene, changed: false };
   }
 
   const suggestedRule = await suggestWindowSceneSwitcherRule(scene.id);
@@ -124,7 +124,7 @@ async function prepareExistingProvisionedScene(
     }
   );
 
-  return scene;
+  return { scene, changed: true };
 }
 
 async function createProvisionedScene(
