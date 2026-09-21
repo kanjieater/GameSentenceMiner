@@ -25,49 +25,38 @@ let binding: any = null;
 let collectionName = "Default";
 let switcherConfig: any = readySwitcherConfig();
 
-const getOBSScenesForSceneSwitcher = vi.fn(async () => scenes);
-const createSceneWithCapture = vi.fn(async () => {
-  scenes = [scene];
-});
-const suggestWindowSceneSwitcherRule = vi.fn(async () => ({
-  titlePattern: ".*Arc the Lad II.*",
-  executableName: "retroarch.exe",
+const mocks = vi.hoisted(() => ({
+  getOBSScenesForSceneSwitcher: vi.fn(),
+  createSceneWithCapture: vi.fn(),
+  getCurrentOBSSceneCollectionName: vi.fn(),
+  getWindowTitleFromSource: vi.fn(),
+  suggestWindowSceneSwitcherRule: vi.fn(),
+  upsertGeneratedWindowSceneRule: vi.fn(),
+  upsertSceneLaunchProfile: vi.fn(),
+  getGameProvisioningBinding: vi.fn(),
+  getSceneLaunchProfileForScene: vi.fn(),
+  getWindowSceneSwitcherConfig: vi.fn(),
+  upsertGameProvisioningBinding: vi.fn(),
 }));
-const upsertGeneratedWindowSceneRule = vi.fn();
-const upsertSceneLaunchProfile = vi.fn((next: any) => {
-  profile = next;
-});
-const getGameProvisioningBinding = vi.fn((externalId: string) => {
-  return binding?.externalId === externalId ? binding : null;
-});
-const upsertGameProvisioningBinding = vi.fn(
-  (externalId: string, boundScene: { id: string; name: string }) => {
-    binding = {
-      externalId,
-      sceneId: boundScene.id,
-      sceneName: boundScene.name,
-    };
-  }
-);
 
 vi.mock("../ui/obs.js", () => ({
-  createSceneWithCapture,
-  getOBSScenesForSceneSwitcher,
-  getCurrentOBSSceneCollectionName: vi.fn(async () => collectionName),
-  getWindowTitleFromSource: vi.fn(async () => "Arc the Lad II - RetroArch"),
-  suggestWindowSceneSwitcherRule,
+  createSceneWithCapture: mocks.createSceneWithCapture,
+  getOBSScenesForSceneSwitcher: mocks.getOBSScenesForSceneSwitcher,
+  getCurrentOBSSceneCollectionName: mocks.getCurrentOBSSceneCollectionName,
+  getWindowTitleFromSource: mocks.getWindowTitleFromSource,
+  suggestWindowSceneSwitcherRule: mocks.suggestWindowSceneSwitcherRule,
 }));
 
 vi.mock("./window_scene_switcher.js", () => ({
-  upsertGeneratedWindowSceneRule,
+  upsertGeneratedWindowSceneRule: mocks.upsertGeneratedWindowSceneRule,
 }));
 
 vi.mock("../store.js", () => ({
-  getGameProvisioningBinding,
-  getSceneLaunchProfileForScene: vi.fn(() => profile),
-  getWindowSceneSwitcherConfig: vi.fn(() => switcherConfig),
-  upsertGameProvisioningBinding,
-  upsertSceneLaunchProfile,
+  getGameProvisioningBinding: mocks.getGameProvisioningBinding,
+  getSceneLaunchProfileForScene: mocks.getSceneLaunchProfileForScene,
+  getWindowSceneSwitcherConfig: mocks.getWindowSceneSwitcherConfig,
+  upsertGameProvisioningBinding: mocks.upsertGameProvisioningBinding,
+  upsertSceneLaunchProfile: mocks.upsertSceneLaunchProfile,
 }));
 
 async function loadRuntime() {
@@ -93,14 +82,41 @@ describe("GSM game provisioning runtime binding", () => {
     binding = null;
     collectionName = "Default";
     switcherConfig = readySwitcherConfig();
-    getOBSScenesForSceneSwitcher.mockReset();
-    getOBSScenesForSceneSwitcher.mockImplementation(async () => scenes);
-    createSceneWithCapture.mockClear();
-    suggestWindowSceneSwitcherRule.mockClear();
-    upsertGeneratedWindowSceneRule.mockClear();
-    upsertSceneLaunchProfile.mockClear();
-    getGameProvisioningBinding.mockClear();
-    upsertGameProvisioningBinding.mockClear();
+    vi.clearAllMocks();
+    mocks.getOBSScenesForSceneSwitcher.mockImplementation(async () => scenes);
+    mocks.createSceneWithCapture.mockImplementation(async () => {
+      scenes = [scene];
+    });
+    mocks.getCurrentOBSSceneCollectionName.mockImplementation(
+      async () => collectionName
+    );
+    mocks.getWindowTitleFromSource.mockImplementation(
+      async () => "Arc the Lad II - RetroArch"
+    );
+    mocks.suggestWindowSceneSwitcherRule.mockImplementation(async () => ({
+      titlePattern: ".*Arc the Lad II.*",
+      executableName: "retroarch.exe",
+    }));
+    mocks.upsertSceneLaunchProfile.mockImplementation((next: any) => {
+      profile = next;
+    });
+    mocks.getGameProvisioningBinding.mockImplementation(
+      (externalId: string) =>
+        binding?.externalId === externalId ? binding : null
+    );
+    mocks.getSceneLaunchProfileForScene.mockImplementation(() => profile);
+    mocks.getWindowSceneSwitcherConfig.mockImplementation(
+      () => switcherConfig
+    );
+    mocks.upsertGameProvisioningBinding.mockImplementation(
+      (externalId: string, boundScene: { id: string; name: string }) => {
+        binding = {
+          externalId,
+          sceneId: boundScene.id,
+          sceneName: boundScene.name,
+        };
+      }
+    );
   });
 
   it("reuses an existing scene only when the active collection has an enabled rule", async () => {
