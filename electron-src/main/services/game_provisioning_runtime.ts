@@ -52,7 +52,7 @@ function chooseSetupCaptureMode(
   return { ...selection, captureMode };
 }
 
-async function findExistingProvisionedScene(
+async function prepareExistingProvisionedScene(
   request: GameProvisioningRequest
 ): Promise<ProvisioningScene | null> {
   const scenes = await getOBSScenes();
@@ -114,7 +114,7 @@ export function createGsmGameProvisioningDependencies(
   resolveCaptureTarget: GameCaptureTargetResolver
 ): GameProvisioningDependencies {
   return {
-    findExistingProvisionedScene,
+    prepareExistingProvisionedScene,
     resolveCaptureTarget,
     createSceneWithCapture: createProvisionedScene,
     getSceneLaunchProfile: async (scene) =>
