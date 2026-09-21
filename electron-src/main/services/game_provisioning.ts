@@ -51,11 +51,11 @@ export type GameProvisioningResult =
 
 export interface GameProvisioningDependencies {
   /**
-   * Return a scene only when GSM already considers this game provisioned:
-   * capture + generated foreground rule exist and point at this game identity.
+   * Reuse a compatible existing scene and ensure it is safe for recurring
+   * automation. Runtime bindings may repair missing GSM-generated rule state,
+   * but must fail closed rather than overwrite conflicting/user-disabled state.
    *
-   * Keeping that semantic in the runtime adapter lets this core short-circuit
-   * before window resolution on recurring launches.
+   * Returning a scene lets this core short-circuit before target resolution.
    */
   prepareExistingProvisionedScene(
     request: GameProvisioningRequest
