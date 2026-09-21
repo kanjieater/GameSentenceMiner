@@ -27,6 +27,11 @@ export interface ProvisioningCaptureTarget {
   selection: ObsSceneCaptureWindowSelection;
 }
 
+export interface ExistingProvisioningState {
+  scene: ProvisioningScene;
+  changed: boolean;
+}
+
 export type CaptureTargetResolution =
   | { status: "resolved"; target: ProvisioningCaptureTarget }
   | { status: "not-ready"; reason?: string }
@@ -59,7 +64,7 @@ export interface GameProvisioningDependencies {
    */
   prepareExistingProvisionedScene(
     request: GameProvisioningRequest
-  ): Promise<ProvisioningScene | null>;
+  ): Promise<ExistingProvisioningState | null>;
 
   /**
    * Resolve the current game to exactly one GSM/OBS capture target.
@@ -156,16 +161,17 @@ export async function ensureGameProvisioned(
   };
 
   try {
-    const existingScene =
+    const existingState =
       await dependencies.prepareExistingProvisionedScene(normalizedRequest);
 
-    if (existingScene) {
+    if (existingState) {
+      const existingScene = existingState.scene;
       const existingProfile =
         await dependencies.getSceneLaunchProfile(existingScene);
 
       if (profileAlreadyHasGenericBaseline(existingScene, existingProfile)) {
         return {
-          status: "already-configured",
+          status: existingState.changed ? "provisioned" : "already-configured",
           scene: existingScene,
           createdScene: false,
           updatedProfile: false,
