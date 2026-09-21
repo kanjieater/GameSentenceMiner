@@ -82,7 +82,7 @@ describe("game provisioning core", () => {
 
   it("short-circuits an already-correct provisioned game before target resolution", async () => {
     const dependencies = makeDependencies({
-      prepareExistingProvisionedScene: vi.fn(async () => scene),
+      prepareExistingProvisionedScene: vi.fn(async () => ({ scene, changed: false })),
       getSceneLaunchProfile: vi.fn(async () => autoOcrProfile()),
     });
 
@@ -107,7 +107,9 @@ describe("game provisioning core", () => {
       return scene;
     });
     const dependencies = makeDependencies({
-      prepareExistingProvisionedScene: vi.fn(async () => existingScene),
+      prepareExistingProvisionedScene: vi.fn(async () =>
+        existingScene ? { scene: existingScene, changed: false } : null
+      ),
       createSceneWithCapture,
       getSceneLaunchProfile: vi.fn(async () => profile),
       upsertSceneLaunchProfile: vi.fn(async (next) => {
@@ -186,7 +188,7 @@ describe("game provisioning core", () => {
       launchDelaySeconds: 1.5,
     });
     const dependencies = makeDependencies({
-      prepareExistingProvisionedScene: vi.fn(async () => scene),
+      prepareExistingProvisionedScene: vi.fn(async () => ({ scene, changed: false })),
       getSceneLaunchProfile: vi.fn(async () => existingProfile),
     });
 
