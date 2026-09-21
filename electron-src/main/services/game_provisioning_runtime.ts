@@ -2,6 +2,7 @@ import {
   getGameProvisioningBinding,
   getSceneLaunchProfileForScene,
   getWindowSceneSwitcherConfig,
+  reserveGameProvisioningBinding,
   upsertGameProvisioningBinding,
   upsertSceneLaunchProfile,
 } from "../store.js";
@@ -101,16 +102,28 @@ function chooseSetupCaptureMode(
 async function prepareExistingProvisionedScene(
   request: GameProvisioningRequest
 ): Promise<{ scene: ProvisioningScene; changed: boolean } | null> {
+  const collection = await getReadyActiveCollection();
+  const collectionName = collection.collectionName;
   const scenes = await getOBSScenesForSceneSwitcher();
   const externalId = request.externalId?.trim();
   let scene: ProvisioningScene | undefined;
 
   if (externalId) {
-    const binding = getGameProvisioningBinding(externalId);
+    const binding = getGameProvisioningBinding(externalId, collectionName);
     if (binding) {
-      scene = scenes.find((candidate) => candidate.id === binding.sceneId);
-      if (!scene) {
-        return null;
+      if (binding.sceneId) {
+        scene = scenes.find((candidate) => candidate.id === binding.sceneId);
+        if (!scene) {
+          return null;
+        }
+      } else {
+        const pendingSceneName = binding.sceneName || request.displayName;
+        scene = scenes.find((candidate) =>
+          sameName(candidate.name, pendingSceneName)
+        );
+        if (!scene) {
+          return null;
+        }
       }
     } else {
       const sameNameScene = scenes.find((candidate) =>
@@ -118,7 +131,7 @@ async function prepareExistingProvisionedScene(
       );
       if (sameNameScene) {
         throw new Error(
-          `A scene named "${sameNameScene.name}" already exists but is not bound to external id "${externalId}"; refusing to claim or modify it automatically.`
+          `A scene named "${sameNameScene.name}" already exists but is not bound to external id "${externalId}" in OBS collection "${collectionName}"; refusing to claim or modify it automatically.`
         );
       }
       return null;
@@ -138,9 +151,6 @@ async function prepareExistingProvisionedScene(
       `A scene named "${scene.name}" already exists but has no reusable window capture; refusing to rebuild it automatically.`
     );
   }
-
-  const collection = await getReadyActiveCollection();
-  const collectionName = collection.collectionName;
 
   const existingRule = collection.rules.find(
     (candidate) => candidate.sceneUuid === scene.id
@@ -223,10 +233,46 @@ export function createGsmGameProvisioningDependencies(
     upsertSceneLaunchProfile: async (profile) => {
       upsertSceneLaunchProfile(profile);
     },
+    reserveProvisioning: async (request) => {
+      const externalId = request.externalId?.trim();
+      if (!externalId) {
+        return;
+      }
+
+      const collection = await getReadyActiveCollection();
+      const existing = getGameProvisioningBinding(
+        externalId,
+        collection.collectionName
+      );
+      if (existing) {
+        return;
+      }
+
+      const scenes = await getOBSScenesForSceneSwitcher();
+      const sameNameScene = scenes.find((candidate) =>
+        sameName(candidate.name, request.displayName)
+      );
+      if (sameNameScene) {
+        throw new Error(
+          `A scene named "${sameNameScene.name}" appeared before provisioning ownership could be reserved; refusing to claim it automatically.`
+        );
+      }
+
+      reserveGameProvisioningBinding(
+        externalId,
+        collection.collectionName,
+        request.displayName
+      );
+    },
     rememberProvisionedScene: async (request, scene) => {
       const externalId = request.externalId?.trim();
       if (externalId) {
-        upsertGameProvisioningBinding(externalId, scene);
+        const collection = await getReadyActiveCollection();
+        upsertGameProvisioningBinding(
+          externalId,
+          collection.collectionName,
+          scene
+        );
       }
     },
   };
