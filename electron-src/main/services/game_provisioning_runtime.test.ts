@@ -38,6 +38,7 @@ const mocks = vi.hoisted(() => ({
   getWindowSceneSwitcherConfig: vi.fn(),
   upsertGameProvisioningBinding: vi.fn(),
   reserveGameProvisioningBinding: vi.fn(),
+  isOBSProvisioningNotReadyError: vi.fn(),
 }));
 
 vi.mock("../ui/obs.js", () => ({
@@ -46,6 +47,7 @@ vi.mock("../ui/obs.js", () => ({
   getCurrentOBSSceneCollectionName: mocks.getCurrentOBSSceneCollectionName,
   getWindowTitleFromSource: mocks.getWindowTitleFromSource,
   suggestWindowSceneSwitcherRule: mocks.suggestWindowSceneSwitcherRule,
+  isOBSProvisioningNotReadyError: mocks.isOBSProvisioningNotReadyError,
 }));
 
 vi.mock("./window_scene_switcher.js", () => ({
@@ -91,6 +93,11 @@ describe("GSM game provisioning runtime binding", () => {
     });
     mocks.getCurrentOBSSceneCollectionName.mockImplementation(
       async () => collectionName
+    );
+    mocks.isOBSProvisioningNotReadyError.mockImplementation(
+      (error: unknown) =>
+        error instanceof Error &&
+        error.message.toLowerCase().includes("not connected")
     );
     mocks.getWindowTitleFromSource.mockImplementation(
       async () => "Arc the Lad II - RetroArch"
@@ -475,6 +482,30 @@ describe("GSM game provisioning runtime binding", () => {
         reason: expect.stringContaining("not migration-ready"),
       })
     );
+    expect(mocks.createSceneWithCapture).not.toHaveBeenCalled();
+  });
+
+  it("reports target-not-ready when strict OBS scene enumeration is temporarily disconnected", async () => {
+    mocks.getOBSScenesForSceneSwitcher.mockRejectedValueOnce(
+      new Error("OBS websocket not connected")
+    );
+    const resolver = vi.fn(async () => ({
+      status: "resolved" as const,
+      target: {
+        title: "Arc the Lad II - RetroArch",
+        selection: { title: "Arc the Lad II - RetroArch" },
+      },
+    }));
+    const { ensureGameProvisionedWithGsm } = await loadRuntime();
+
+    const result = await ensureGameProvisionedWithGsm(request, resolver);
+
+    expect(result).toEqual({
+      status: "target-not-ready",
+      reason:
+        "OBS scene enumeration is not ready yet: OBS websocket not connected",
+    });
+    expect(resolver).not.toHaveBeenCalled();
     expect(mocks.createSceneWithCapture).not.toHaveBeenCalled();
   });
 
