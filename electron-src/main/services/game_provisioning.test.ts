@@ -52,7 +52,7 @@ function makeDependencies(
   overrides: Partial<GameProvisioningDependencies> = {}
 ): GameProvisioningDependencies {
   return {
-    findExistingProvisionedScene: vi.fn(async () => null),
+    prepareExistingProvisionedScene: vi.fn(async () => null),
     resolveCaptureTarget: vi.fn(async () => ({ status: "resolved", target })),
     createSceneWithCapture: vi.fn(async () => scene),
     getSceneLaunchProfile: vi.fn(async () => null),
@@ -82,7 +82,7 @@ describe("game provisioning core", () => {
 
   it("short-circuits an already-correct provisioned game before target resolution", async () => {
     const dependencies = makeDependencies({
-      findExistingProvisionedScene: vi.fn(async () => scene),
+      prepareExistingProvisionedScene: vi.fn(async () => scene),
       getSceneLaunchProfile: vi.fn(async () => autoOcrProfile()),
     });
 
@@ -107,7 +107,7 @@ describe("game provisioning core", () => {
       return scene;
     });
     const dependencies = makeDependencies({
-      findExistingProvisionedScene: vi.fn(async () => existingScene),
+      prepareExistingProvisionedScene: vi.fn(async () => existingScene),
       createSceneWithCapture,
       getSceneLaunchProfile: vi.fn(async () => profile),
       upsertSceneLaunchProfile: vi.fn(async (next) => {
@@ -186,7 +186,7 @@ describe("game provisioning core", () => {
       launchDelaySeconds: 1.5,
     });
     const dependencies = makeDependencies({
-      findExistingProvisionedScene: vi.fn(async () => scene),
+      prepareExistingProvisionedScene: vi.fn(async () => scene),
       getSceneLaunchProfile: vi.fn(async () => existingProfile),
     });
 
