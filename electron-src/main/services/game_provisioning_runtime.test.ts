@@ -409,6 +409,7 @@ describe("GSM game provisioning runtime binding", () => {
   });
 
   it("fails closed when strict OBS scene enumeration fails", async () => {
+    scenes = [scene];
     getOBSScenesForSceneSwitcher.mockRejectedValueOnce(
       new Error("OBS scene enumeration failed")
     );
@@ -449,7 +450,10 @@ describe("GSM game provisioning runtime binding", () => {
     }));
     const { ensureGameProvisionedWithGsm } = await loadRuntime();
 
-    const result = await ensureGameProvisionedWithGsm(request, resolver);
+    const result = await ensureGameProvisionedWithGsm(
+      externalRequest,
+      resolver
+    );
 
     expect(result).toEqual({
       status: "provisioned",
@@ -478,5 +482,9 @@ describe("GSM game provisioning runtime binding", () => {
       agentScriptPath: "",
       launchDelaySeconds: 0,
     });
+    expect(upsertGameProvisioningBinding).toHaveBeenCalledWith(
+      externalRequest.externalId,
+      scene
+    );
   });
 });
