@@ -162,8 +162,10 @@ interface FrontPageState {
 
 export interface GameProvisioningBinding {
     externalId: string;
+    collectionName: string;
     sceneId: string;
     sceneName: string;
+    pending: boolean;
 }
 
 interface StoreConfig {
@@ -942,34 +944,87 @@ export function setWindowSceneSwitcherConfig(config: WindowSceneSwitcherConfig):
     store.set("windowSceneSwitcher", config);
 }
 
-export function getGameProvisioningBinding(externalId: string): GameProvisioningBinding | null {
+function normalizeProvisioningBindingCollectionName(collectionName: string): string {
+    return (collectionName ?? "").trim();
+}
+
+export function getGameProvisioningBinding(
+    externalId: string,
+    collectionName: string
+): GameProvisioningBinding | null {
     const normalizedExternalId = (externalId ?? "").trim();
-    if (!normalizedExternalId) {
+    const normalizedCollectionName =
+        normalizeProvisioningBindingCollectionName(collectionName);
+    if (!normalizedExternalId || !normalizedCollectionName) {
         return null;
     }
     const bindings = store.get("gameProvisioningBindings", []);
-    return bindings.find((binding) => binding.externalId === normalizedExternalId) ?? null;
+    return bindings.find(
+        (binding) =>
+            binding.externalId === normalizedExternalId &&
+            binding.collectionName === normalizedCollectionName
+    ) ?? null;
+}
+
+export function reserveGameProvisioningBinding(
+    externalId: string,
+    collectionName: string,
+    sceneName: string
+): void {
+    const normalizedExternalId = (externalId ?? "").trim();
+    const normalizedCollectionName =
+        normalizeProvisioningBindingCollectionName(collectionName);
+    const normalizedSceneName = (sceneName ?? "").trim();
+    if (!normalizedExternalId || !normalizedCollectionName || !normalizedSceneName) {
+        return;
+    }
+
+    const bindings = store.get("gameProvisioningBindings", []);
+    const index = bindings.findIndex(
+        (binding) =>
+            binding.externalId === normalizedExternalId &&
+            binding.collectionName === normalizedCollectionName
+    );
+    if (index >= 0) {
+        return;
+    }
+
+    bindings.push({
+        externalId: normalizedExternalId,
+        collectionName: normalizedCollectionName,
+        sceneId: "",
+        sceneName: normalizedSceneName,
+        pending: true,
+    });
+    store.set("gameProvisioningBindings", bindings);
 }
 
 export function upsertGameProvisioningBinding(
     externalId: string,
+    collectionName: string,
     scene: ObsScene
 ): void {
     const normalizedExternalId = (externalId ?? "").trim();
+    const normalizedCollectionName =
+        normalizeProvisioningBindingCollectionName(collectionName);
     const sceneId = (scene?.id ?? "").trim();
     const sceneName = (scene?.name ?? "").trim();
-    if (!normalizedExternalId || !sceneId || !sceneName) {
+    if (!normalizedExternalId || !normalizedCollectionName || !sceneId || !sceneName) {
         return;
     }
 
     const bindings = store.get("gameProvisioningBindings", []);
     const next: GameProvisioningBinding = {
         externalId: normalizedExternalId,
+        collectionName: normalizedCollectionName,
         sceneId,
         sceneName,
+        pending: false,
     };
     const index = bindings.findIndex(
-        (binding) => binding.externalId === normalizedExternalId
+        (binding) =>
+            binding.externalId === normalizedExternalId &&
+            binding.collectionName === normalizedCollectionName
     );
     if (index >= 0) {
         bindings[index] = next;
