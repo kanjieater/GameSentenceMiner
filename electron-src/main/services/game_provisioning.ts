@@ -57,7 +57,7 @@ export interface GameProvisioningDependencies {
    * Keeping that semantic in the runtime adapter lets this core short-circuit
    * before window resolution on recurring launches.
    */
-  findExistingProvisionedScene(
+  prepareExistingProvisionedScene(
     request: GameProvisioningRequest
   ): Promise<ProvisioningScene | null>;
 
@@ -157,7 +157,7 @@ export async function ensureGameProvisioned(
 
   try {
     const existingScene =
-      await dependencies.findExistingProvisionedScene(normalizedRequest);
+      await dependencies.prepareExistingProvisionedScene(normalizedRequest);
 
     if (existingScene) {
       const existingProfile =
