@@ -40,3 +40,8 @@
   - silent NSIS install: `pwsh ./tools/deploy-fork-build.ps1 -Ref <branch> -Install -Silent`
 - The deploy helper resolves the requested remote ref to an exact commit, only accepts an artifact for that commit, waits for an in-progress build or triggers `workflow_dispatch` when needed, and verifies `build-info.json` before installation.
 - Fork CI artifacts are intentionally unsigned development builds. Do not reuse upstream SignPath/release credentials or publish fork development builds into the upstream release channel.
+- If hosted Actions are unavailable (for example, runner quota exhausted), build the same Windows fork artifact locally from a native Windows PowerShell/pwsh session with:
+  - `pwsh ./tools/build-fork-windows-local.ps1`
+- The local builder intentionally refuses WSL/Linux because GSM packages Windows-native Python, Rust, Electron, and NSIS components. Docker Desktop using the WSL2 backend is still a Linux-container path and is not a substitute for the native Windows build.
+- The local builder mirrors the fork workflow, runs the focused provisioning transport test by default, and writes a commit-addressed artifact directory under `dist/local-build-<sha>/` containing the installer, unpacked zip, update metadata when present, and `build-info.json`.
+
