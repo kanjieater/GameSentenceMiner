@@ -173,6 +173,15 @@ try {
     Invoke-Checked "Stage overlay for Electron" {
         npm run stage:overlay
     }
+
+    # Remove only previous packaging outputs; keep freshly compiled dist/main,
+    # dist/preload, dist/shared, and dist/renderer.
+    Get-ChildItem -LiteralPath $distDir -Filter "GameSentenceMiner-Setup-*.exe" -ErrorAction SilentlyContinue | Remove-Item -Force
+    Get-ChildItem -LiteralPath $distDir -Filter "*.blockmap" -ErrorAction SilentlyContinue | Remove-Item -Force
+    Remove-Item -LiteralPath (Join-Path $distDir "latest.yml") -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath (Join-Path $distDir "win-unpacked") -Recurse -Force -ErrorAction SilentlyContinue
+    Get-ChildItem -LiteralPath $distDir -Filter "GameSentenceMiner-*-win-unpacked.zip" -ErrorAction SilentlyContinue | Remove-Item -Force
+
     Invoke-Checked "Package Windows installer and unpacked app" {
         npx electron-builder --publish=never --win
     }
