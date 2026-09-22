@@ -107,6 +107,12 @@ import {
     getGameProvisioningSecondInstanceArgs,
     hasEnsureGameCommand,
 } from './services/game_provisioning_command.js';
+import {
+    completeGameProvisioningRequest,
+    enqueueGameProvisioningRequest,
+    ensureGameProvisioningInbox,
+    listPendingGameProvisioningRequests,
+} from './services/game_provisioning_inbox.js';
 import { ensureGameProvisionedWithRetry } from './services/game_provisioning_retry.js';
 import type {
     ForegroundWindowSnapshot,
@@ -2652,6 +2658,57 @@ async function processArgsAndStartSettings() {
     }
 }
 
+let gameProvisioningInboxWatcher: fs.FSWatcher | null = null;
+let gameProvisioningInboxDrain: Promise<void> = Promise.resolve();
+
+function scheduleGameProvisioningInboxDrain(): void {
+    gameProvisioningInboxDrain = gameProvisioningInboxDrain
+        .catch(() => undefined)
+        .then(async () => {
+            const requests = listPendingGameProvisioningRequests(BASE_DIR);
+            for (const request of requests) {
+                try {
+                    log.info(
+                        '[GameProvisioning] Processing queued provisioning request ' +
+                        path.basename(request.path) +
+                        '.'
+                    );
+                    await processCommandLineArgs(request.args);
+                } catch (error) {
+                    log.warn(
+                        '[GameProvisioning] Queued provisioning request failed:',
+                        error
+                    );
+                } finally {
+                    completeGameProvisioningRequest(request.path);
+                }
+            }
+        });
+}
+
+function startGameProvisioningInboxWatcher(): void {
+    if (gameProvisioningInboxWatcher) {
+        return;
+    }
+
+    const inboxDir = ensureGameProvisioningInbox(BASE_DIR);
+    scheduleGameProvisioningInboxDrain();
+    gameProvisioningInboxWatcher = fs.watch(inboxDir, (_eventType, filename) => {
+        if (!filename || !filename.toString().endsWith('.json')) {
+            return;
+        }
+        scheduleGameProvisioningInboxDrain();
+    });
+    gameProvisioningInboxWatcher.on('error', (error) => {
+        log.warn('[GameProvisioning] Provisioning inbox watcher failed:', error);
+    });
+}
+
+function stopGameProvisioningInboxWatcher(): void {
+    gameProvisioningInboxWatcher?.close();
+    gameProvisioningInboxWatcher = null;
+}
+
 app.setPath('userData', path.join(BASE_DIR, 'electron'));
 // Expose the resolved data dir to every spawned child (overlay binary, python) via inherited env.
 process.env.GSM_DATA_DIR = BASE_DIR;
@@ -2674,6 +2731,24 @@ const gotSingleInstanceLock = singleInstanceData
     : app.requestSingleInstanceLock();
 
 if (!gotSingleInstanceLock) {
+    if (hasEnsureGameCommand(startupArgs)) {
+        try {
+            const requestPath = enqueueGameProvisioningRequest(
+                BASE_DIR,
+                startupArgs
+            );
+            log.info(
+                '[GameProvisioning] Queued provisioning request for the running instance: ' +
+                path.basename(requestPath)
+            );
+        } catch (error) {
+            log.error(
+                '[GameProvisioning] Failed to queue provisioning request for the running instance:',
+                error
+            );
+        }
+    }
+
     app.whenReady().then(() => {
         if (!hasEnsureGameCommand(startupArgs)) {
             dialog.showMessageBoxSync({
@@ -2686,6 +2761,8 @@ if (!gotSingleInstanceLock) {
         app.quit();
     });
 } else {
+    startGameProvisioningInboxWatcher();
+
     app.on('second-instance', (_event, commandLine, _workingDirectory, additionalData) => {
         const forwardedArgs = getGameProvisioningSecondInstanceArgs(
             commandLine,
@@ -2697,15 +2774,13 @@ if (!gotSingleInstanceLock) {
             return;
         }
 
-        console.log(
-            '[GameProvisioning] Received second-instance provisioning request.'
-        );
+        log.info('[GameProvisioning] Received second-instance provisioning request.');
         void app.whenReady()
             .then(async () => {
                 await processCommandLineArgs(forwardedArgs);
             })
             .catch((error) =>
-                console.warn(
+                log.warn(
                     '[GameProvisioning] Failed to process second-instance args:',
                     error
                 )
@@ -2903,6 +2978,7 @@ if (!gotSingleInstanceLock) {
 
         app.on('will-quit', () => {
             autoLauncher.stopPolling();
+            stopGameProvisioningInboxWatcher();
         });
     });
 }
