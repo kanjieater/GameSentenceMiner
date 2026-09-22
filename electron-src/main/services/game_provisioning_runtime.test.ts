@@ -702,6 +702,49 @@ describe("GSM game provisioning runtime binding", () => {
     );
   });
 
+  it("does not let a pending reservation claim a same-title scene with the wrong executable", async () => {
+    scenes = [scene];
+    bindings = [
+      {
+        externalId: externalRequest.externalId,
+        collectionName: "Default",
+        sceneId: "",
+        sceneName: scene.name,
+        pending: true,
+        captureTitle: "Arc the Lad II - RetroArch",
+        executableName: "retroarch.exe",
+      },
+    ];
+    mocks.getWindowTitleFromSource.mockResolvedValue(
+      "Arc the Lad II - RetroArch"
+    );
+    mocks.suggestWindowSceneSwitcherRule.mockResolvedValueOnce({
+      titlePattern: ".*Arc the Lad II.*",
+      executableName: "unrelated.exe",
+    });
+    const resolver = vi.fn(async () => ({
+      status: "not-ready" as const,
+      reason: "should not run",
+    }));
+    const { ensureGameProvisionedWithGsm } = await loadRuntime();
+
+    const result = await ensureGameProvisionedWithGsm(
+      externalRequest,
+      resolver
+    );
+
+    expect(result.status).toBe("failed");
+    expect(result).toEqual(
+      expect.objectContaining({
+        reason: expect.stringContaining(
+          "does not match the executable in same-name scene"
+        ),
+      })
+    );
+    expect(resolver).not.toHaveBeenCalled();
+    expect(mocks.upsertGameProvisioningBinding).not.toHaveBeenCalled();
+  });
+
   it("reports target-not-ready when the active collection migration state has not appeared yet", async () => {
     switcherConfig = {
       schemaVersion: 1,
