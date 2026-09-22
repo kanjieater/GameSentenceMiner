@@ -2600,10 +2600,11 @@ async function processGameProvisioningArgs(args: string[]): Promise<void> {
         return;
     }
 
+    const reason = 'reason' in result ? result.reason : undefined;
     console.warn(
         '[GameProvisioning] ' +
         result.status +
-        (result.reason ? ': ' + result.reason : '')
+        (reason ? ': ' + reason : '')
     );
 }
 
