@@ -50,8 +50,31 @@ if (-not $expectedSha) {
 }
 
 $shortSha = $expectedSha.Substring(0, 12)
+$artifactName = "gsm-windows-$expectedSha"
 if (-not $Destination) {
     $Destination = Join-Path (Get-Location) "artifacts/gsm-fork-$shortSha"
+}
+
+function Test-RunArtifactAvailable {
+    param([Parameter(Mandatory = $true)]$Run)
+
+    if ($Run.status -ne "completed" -or $Run.conclusion -ne "success") {
+        return $false
+    }
+
+    $artifactJson = Invoke-GhJson @(
+        "api",
+        "repos/$Repo/actions/runs/$($Run.databaseId)/artifacts"
+    )
+    $artifactPayload = $artifactJson | ConvertFrom-Json
+    $artifact = @($artifactPayload.artifacts) |
+        Where-Object {
+            $_.name -eq $artifactName -and
+            -not [bool]$_.expired
+        } |
+        Select-Object -First 1
+
+    return $null -ne $artifact
 }
 
 function Get-MatchingRun {
@@ -65,17 +88,29 @@ function Get-MatchingRun {
     )
 
     $runs = @($json | ConvertFrom-Json)
-    return $runs |
-        Where-Object { $_.headSha -eq $expectedSha } |
-        Sort-Object { [DateTime]$_.createdAt } -Descending |
-        Select-Object -First 1
+    $matches = @(
+        $runs |
+            Where-Object { $_.headSha -eq $expectedSha } |
+            Sort-Object { [DateTime]$_.createdAt } -Descending
+    )
+
+    foreach ($candidate in $matches) {
+        if ($candidate.status -ne "completed") {
+            return $candidate
+        }
+
+        if (
+            $candidate.conclusion -eq "success" -and
+            (Test-RunArtifactAvailable -Run $candidate)
+        ) {
+            return $candidate
+        }
+    }
+
+    return $null
 }
 
 $run = Get-MatchingRun
-
-if ($run -and $run.status -eq "completed" -and $run.conclusion -ne "success") {
-    $run = $null
-}
 
 if (-not $run) {
     Write-Host "No usable Windows build exists for $Ref @ $shortSha. Triggering CI..."
@@ -120,12 +155,20 @@ if ($conclusion -ne "success") {
     throw "Windows build run $($run.databaseId) is not successful (conclusion: $conclusion)."
 }
 
+$completedRun = [pscustomobject]@{
+    databaseId = $run.databaseId
+    status = "completed"
+    conclusion = "success"
+}
+if (-not (Test-RunArtifactAvailable -Run $completedRun)) {
+    throw "Windows build run $($run.databaseId) succeeded but artifact '$artifactName' is missing or expired."
+}
+
 if (Test-Path $Destination) {
     Remove-Item -LiteralPath $Destination -Recurse -Force
 }
 New-Item -ItemType Directory -Force -Path $Destination | Out-Null
 
-$artifactName = "gsm-windows-$expectedSha"
 Write-Host "Downloading $artifactName from run $($run.databaseId)..."
 & gh run download $run.databaseId --repo $Repo --name $artifactName --dir $Destination
 if ($LASTEXITCODE -ne 0) {
