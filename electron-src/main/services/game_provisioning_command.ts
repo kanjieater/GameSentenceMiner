@@ -141,7 +141,15 @@ export function parseGameProvisioningCommand(
   const encodedTokens = args.filter((arg) =>
     arg.startsWith(GAME_PROVISIONING_TOKEN_PREFIX)
   );
+  const hasLegacyEnsureGame = args.includes("--ensure-game");
   if (encodedTokens.length > 0) {
+    if (hasLegacyEnsureGame) {
+      return {
+        kind: "invalid",
+        reason:
+          "Provisioning token transport cannot be combined with legacy --ensure-game arguments.",
+      };
+    }
     if (encodedTokens.length !== 1) {
       return {
         kind: "invalid",
