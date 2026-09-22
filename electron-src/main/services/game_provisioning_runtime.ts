@@ -10,9 +10,9 @@ import {
   createSceneWithCapture,
   getCurrentOBSSceneCollectionName,
   getOBSScenesForSceneSwitcher,
-  getWindowTitleFromSource,
+  getWindowTitleFromSourceForProvisioning,
   isOBSProvisioningNotReadyError,
-  suggestWindowSceneSwitcherRule,
+  suggestWindowSceneSwitcherRuleForProvisioning,
 } from "../ui/obs.js";
 import {
   parseObsWindowValue,
@@ -228,7 +228,7 @@ async function prepareExistingProvisionedScene(
 
         const actualCaptureTitle = await withProvisioningOBSReadiness(
           "OBS pending capture inspection",
-          () => getWindowTitleFromSource(scene.id)
+          () => getWindowTitleFromSourceForProvisioning(scene.id)
         );
         if (
           !actualCaptureTitle?.trim() ||
@@ -243,7 +243,7 @@ async function prepareExistingProvisionedScene(
         if (binding.executableName?.trim()) {
           const suggestedRule = await withProvisioningOBSReadiness(
             "OBS pending executable inspection",
-            () => suggestWindowSceneSwitcherRule(scene.id)
+            () => suggestWindowSceneSwitcherRuleForProvisioning(scene.id)
           );
           const actualExecutable = normalizeExecutableName(
             suggestedRule?.executableName
@@ -280,7 +280,7 @@ async function prepareExistingProvisionedScene(
 
   const captureTitle = await withProvisioningOBSReadiness(
     "OBS capture inspection",
-    () => getWindowTitleFromSource(scene.id)
+    () => getWindowTitleFromSourceForProvisioning(scene.id)
   );
   if (!captureTitle?.trim()) {
     throw new Error(
@@ -302,7 +302,7 @@ async function prepareExistingProvisionedScene(
 
   const suggestedRule = await withProvisioningOBSReadiness(
     "OBS scene-switcher rule inspection",
-    () => suggestWindowSceneSwitcherRule(scene.id)
+    () => suggestWindowSceneSwitcherRuleForProvisioning(scene.id)
   );
   if (!suggestedRule?.titlePattern) {
     throw new Error(
