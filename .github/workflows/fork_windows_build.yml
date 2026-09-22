@@ -32,9 +32,11 @@ jobs:
           submodules: true
           fetch-depth: 1
 
-      - name: Test fork deployment helper contract
+      - name: Test fork build/deployment helper contracts
         shell: pwsh
-        run: ./tools/test-deploy-fork-build-contract.ps1
+        run: |
+          ./tools/test-deploy-fork-build-contract.ps1
+          ./tools/test-build-fork-windows-local-contract.ps1
 
       - name: Set up Python
         uses: actions/setup-python@v5
