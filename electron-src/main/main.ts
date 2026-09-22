@@ -2669,11 +2669,41 @@ if (process.platform === 'darwin') {
 
 const startupArgs = process.argv.slice(1);
 const singleInstanceData = createGameProvisioningSingleInstanceData(startupArgs);
+const provisioningTransportDiagnostic = {
+    pid: process.pid,
+    execPath: process.execPath,
+    argv: process.argv,
+    baseDir: BASE_DIR,
+    userData: app.getPath('userData'),
+    isAdmin: isRunningAsAdmin(),
+    hasEnsureGame: hasEnsureGameCommand(startupArgs),
+    hasAdditionalData: Boolean(singleInstanceData),
+};
+log.info(
+    '[GameProvisioning][Transport] Before requestSingleInstanceLock ' +
+    JSON.stringify(provisioningTransportDiagnostic)
+);
+
 const gotSingleInstanceLock = singleInstanceData
     ? app.requestSingleInstanceLock(singleInstanceData)
     : app.requestSingleInstanceLock();
 
+log.info(
+    '[GameProvisioning][Transport] requestSingleInstanceLock result ' +
+    JSON.stringify({
+        ...provisioningTransportDiagnostic,
+        acquired: gotSingleInstanceLock,
+    })
+);
+
 if (!gotSingleInstanceLock) {
+    log.info(
+        '[GameProvisioning][Transport] Secondary instance exiting after lock contention ' +
+        JSON.stringify({
+            pid: process.pid,
+            hasEnsureGame: hasEnsureGameCommand(startupArgs),
+        })
+    );
     app.whenReady().then(() => {
         if (!hasEnsureGameCommand(startupArgs)) {
             dialog.showMessageBoxSync({
@@ -2686,7 +2716,20 @@ if (!gotSingleInstanceLock) {
         app.quit();
     });
 } else {
-    app.on('second-instance', (_event, commandLine, _workingDirectory, additionalData) => {
+    app.on('second-instance', (_event, commandLine, workingDirectory, additionalData) => {
+        log.info(
+            '[GameProvisioning][Transport] second-instance event ' +
+            JSON.stringify({
+                primaryPid: process.pid,
+                commandLine,
+                workingDirectory,
+                additionalData,
+                baseDir: BASE_DIR,
+                userData: app.getPath('userData'),
+                isAdmin: isRunningAsAdmin(),
+            })
+        );
+
         const forwardedArgs = getGameProvisioningSecondInstanceArgs(
             commandLine,
             additionalData
@@ -2697,15 +2740,19 @@ if (!gotSingleInstanceLock) {
             return;
         }
 
-        console.log(
-            '[GameProvisioning] Received second-instance provisioning request.'
+        log.info(
+            '[GameProvisioning] Received second-instance provisioning request ' +
+            JSON.stringify({
+                primaryPid: process.pid,
+                forwardedArgs,
+            })
         );
         void app.whenReady()
             .then(async () => {
                 await processCommandLineArgs(forwardedArgs);
             })
             .catch((error) =>
-                console.warn(
+                log.warn(
                     '[GameProvisioning] Failed to process second-instance args:',
                     error
                 )

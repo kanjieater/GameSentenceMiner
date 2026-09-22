@@ -11,6 +11,47 @@ const OVERLAY_RESOURCES_ARG = '--gsm-overlay-resources';
 const OVERLAY_RESOURCES_ENV = 'GSM_OVERLAY_RESOURCES_PATH';
 const AGENT_HOST_ARG = '--gsm-agent-host';
 
+function getProvisioningBootstrapTracePath(): string {
+    const root =
+        process.env.LOCALAPPDATA ||
+        process.env.APPDATA ||
+        process.cwd();
+    return path.join(
+        root,
+        'GameSentenceMiner',
+        'diagnostics',
+        'electron-provisioning-bootstrap.log'
+    );
+}
+
+function traceProvisioningBootstrap(stage: string, extra?: unknown): void {
+    try {
+        const tracePath = getProvisioningBootstrapTracePath();
+        fs.mkdirSync(path.dirname(tracePath), { recursive: true });
+        fs.appendFileSync(
+            tracePath,
+            JSON.stringify({
+                at: new Date().toISOString(),
+                stage,
+                pid: process.pid,
+                execPath: process.execPath,
+                argv: process.argv,
+                cwd: process.cwd(),
+                isPackaged: app.isPackaged,
+                resourcesPath: process.resourcesPath,
+                defaultUserData: app.getPath('userData'),
+                hasEnsureGame: process.argv.includes('--ensure-game'),
+                extra,
+            }) + '\n',
+            'utf8'
+        );
+    } catch {
+        // Diagnostic tracing must never change startup behavior.
+    }
+}
+
+traceProvisioningBootstrap('bootstrap-enter');
+
 // Portals identify an unpackaged Linux process by its installed .desktop file.
 // Resolve that identity before Electron is ready and pass the matching app ID to
 // the shared input service that owns the Wayland shortcut session.
@@ -124,9 +165,24 @@ if (process.argv.includes(AGENT_HOST_ARG)) {
     }
 } else {
     traceOverlayBootstrap('main app mode detected');
-    void import('./main.js').catch((error) => {
-        console.error('GSM startup failed:', error);
-        dialog.showErrorBox('GSM Startup Failed', error instanceof Error ? error.message : String(error));
-        app.exit(1);
-    });
+    traceProvisioningBootstrap('before-main-import');
+    void import('./main.js')
+        .then(() => {
+            traceProvisioningBootstrap('main-import-resolved');
+        })
+        .catch((error) => {
+            traceProvisioningBootstrap(
+                'main-import-rejected',
+                error instanceof Error
+                    ? {
+                        name: error.name,
+                        message: error.message,
+                        stack: error.stack,
+                    }
+                    : String(error)
+            );
+            console.error('GSM startup failed:', error);
+            dialog.showErrorBox('GSM Startup Failed', error instanceof Error ? error.message : String(error));
+            app.exit(1);
+        });
 }
