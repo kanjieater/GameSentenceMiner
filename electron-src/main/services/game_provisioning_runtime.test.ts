@@ -434,6 +434,274 @@ describe("GSM game provisioning runtime binding", () => {
     expect(mocks.createSceneWithCapture).not.toHaveBeenCalled();
   });
 
+  it("keeps the same external id independently bound across OBS collections", async () => {
+    const sceneA = { id: "scene-a", name: "Arc the Lad II" };
+    const sceneB = { id: "scene-b", name: "Arc the Lad II" };
+    const profiles = new Map<string, any>([
+      [
+        sceneA.id,
+        {
+          sceneId: sceneA.id,
+          sceneName: sceneA.name,
+          textHookMode: "none",
+          ocrMode: "auto",
+          launchOverlay: false,
+          agentScriptPath: "",
+          launchDelaySeconds: 0,
+        },
+      ],
+    ]);
+    mocks.getSceneLaunchProfileForScene.mockImplementation(
+      (candidate: { id: string }) => profiles.get(candidate.id) ?? null
+    );
+    mocks.upsertSceneLaunchProfile.mockImplementation((next: any) => {
+      if (next.sceneId) {
+        profiles.set(next.sceneId, next);
+      }
+    });
+
+    switcherConfig = {
+      schemaVersion: 1,
+      collections: [
+        {
+          collectionName: "Collection A",
+          collectionFileName: "Collection_A.json",
+          enabled: true,
+          migrationVersion: 1,
+          legacySwitcherDisabled: true,
+          rules: [
+            {
+              sceneUuid: sceneA.id,
+              sceneName: sceneA.name,
+              titlePattern: ".*Arc the Lad II.*",
+              executableName: "retroarch.exe",
+              enabled: true,
+              source: "gsm-generated",
+            },
+          ],
+        },
+        {
+          collectionName: "Collection B",
+          collectionFileName: "Collection_B.json",
+          enabled: true,
+          migrationVersion: 1,
+          legacySwitcherDisabled: true,
+          rules: [],
+        },
+      ],
+    };
+    bindings = [
+      {
+        externalId: externalRequest.externalId,
+        collectionName: "Collection A",
+        sceneId: sceneA.id,
+        sceneName: sceneA.name,
+        pending: false,
+      },
+    ];
+    collectionName = "Collection A";
+    scenes = [sceneA];
+
+    const resolver = vi.fn(async () => ({
+      status: "resolved" as const,
+      target: {
+        title: "Arc the Lad II - RetroArch",
+        selection: {
+          title: "Arc the Lad II - RetroArch",
+          targetKind: "window" as const,
+          captureValues: {
+            window_capture:
+              "Arc the Lad II - RetroArch:Qt6QWindowIcon:retroarch.exe",
+          },
+        },
+      },
+    }));
+    const { ensureGameProvisionedWithGsm } = await loadRuntime();
+
+    const inA = await ensureGameProvisionedWithGsm(
+      externalRequest,
+      resolver
+    );
+    expect(inA.status).toBe("already-configured");
+    expect(resolver).not.toHaveBeenCalled();
+
+    collectionName = "Collection B";
+    scenes = [];
+    mocks.createSceneWithCapture.mockImplementationOnce(async () => {
+      scenes = [sceneB];
+    });
+
+    const inB = await ensureGameProvisionedWithGsm(
+      externalRequest,
+      resolver
+    );
+    expect(inB.status).toBe("provisioned");
+    expect(
+      bindings.find(
+        (binding) =>
+          binding.externalId === externalRequest.externalId &&
+          binding.collectionName === "Collection B"
+      )
+    ).toEqual(
+      expect.objectContaining({
+        sceneId: sceneB.id,
+        pending: false,
+      })
+    );
+
+    collectionName = "Collection A";
+    scenes = [sceneA];
+
+    const backInA = await ensureGameProvisionedWithGsm(
+      externalRequest,
+      resolver
+    );
+    expect(backInA.status).toBe("already-configured");
+    expect(
+      bindings.find(
+        (binding) =>
+          binding.externalId === externalRequest.externalId &&
+          binding.collectionName === "Collection A"
+      )
+    ).toEqual(
+      expect.objectContaining({
+        sceneId: sceneA.id,
+        pending: false,
+      })
+    );
+    expect(
+      bindings.filter(
+        (binding) => binding.externalId === externalRequest.externalId
+      )
+    ).toHaveLength(2);
+  });
+
+  it("recovers a fingerprinted pending binding after scene creation partially succeeds", async () => {
+    const resolver = vi.fn(async () => ({
+      status: "resolved" as const,
+      target: {
+        title: "Arc the Lad II - RetroArch",
+        selection: {
+          title: "Arc the Lad II - RetroArch",
+          targetKind: "window" as const,
+          captureValues: {
+            window_capture:
+              "Arc the Lad II - RetroArch:Qt6QWindowIcon:retroarch.exe",
+          },
+        },
+      },
+    }));
+    mocks.createSceneWithCapture.mockImplementationOnce(async () => {
+      scenes = [scene];
+      throw new Error("OBS failed after creating the scene");
+    });
+    const { ensureGameProvisionedWithGsm } = await loadRuntime();
+
+    const first = await ensureGameProvisionedWithGsm(
+      externalRequest,
+      resolver
+    );
+
+    expect(first).toEqual({
+      status: "failed",
+      reason: "OBS failed after creating the scene",
+    });
+    expect(bindings).toEqual([
+      expect.objectContaining({
+        externalId: externalRequest.externalId,
+        collectionName: "Default",
+        sceneId: "",
+        sceneName: scene.name,
+        pending: true,
+        captureTitle: "Arc the Lad II - RetroArch",
+        executableName: "retroarch.exe",
+      }),
+    ]);
+
+    const second = await ensureGameProvisionedWithGsm(
+      externalRequest,
+      resolver
+    );
+
+    expect(second).toEqual({
+      status: "provisioned",
+      scene,
+      createdScene: false,
+      updatedProfile: true,
+    });
+    expect(resolver).toHaveBeenCalledTimes(1);
+    expect(mocks.createSceneWithCapture).toHaveBeenCalledTimes(1);
+    expect(bindings).toEqual([
+      expect.objectContaining({
+        externalId: externalRequest.externalId,
+        collectionName: "Default",
+        sceneId: scene.id,
+        sceneName: scene.name,
+        pending: false,
+      }),
+    ]);
+  });
+
+  it("does not let an orphaned pending reservation claim an unrelated same-name scene", async () => {
+    const resolver = vi.fn(async () => ({
+      status: "resolved" as const,
+      target: {
+        title: "Arc the Lad II - RetroArch",
+        selection: {
+          title: "Arc the Lad II - RetroArch",
+          targetKind: "window" as const,
+          captureValues: {
+            window_capture:
+              "Arc the Lad II - RetroArch:Qt6QWindowIcon:retroarch.exe",
+          },
+        },
+      },
+    }));
+    mocks.createSceneWithCapture.mockRejectedValueOnce(
+      new Error("OBS failed before creating the scene")
+    );
+    const { ensureGameProvisionedWithGsm } = await loadRuntime();
+
+    const first = await ensureGameProvisionedWithGsm(
+      externalRequest,
+      resolver
+    );
+    expect(first.status).toBe("failed");
+    expect(bindings[0]).toEqual(
+      expect.objectContaining({
+        pending: true,
+        captureTitle: "Arc the Lad II - RetroArch",
+        executableName: "retroarch.exe",
+      })
+    );
+
+    scenes = [scene];
+    mocks.getWindowTitleFromSource.mockImplementationOnce(
+      async () => "Unrelated Manual Window"
+    );
+
+    const second = await ensureGameProvisionedWithGsm(
+      externalRequest,
+      resolver
+    );
+
+    expect(second.status).toBe("failed");
+    expect(second).toEqual(
+      expect.objectContaining({
+        reason: expect.stringContaining(
+          "does not match the capture in same-name scene"
+        ),
+      })
+    );
+    expect(mocks.upsertGameProvisioningBinding).not.toHaveBeenCalled();
+    expect(bindings[0]).toEqual(
+      expect.objectContaining({
+        sceneId: "",
+        pending: true,
+      })
+    );
+  });
+
   it("reports target-not-ready when the active collection migration state has not appeared yet", async () => {
     switcherConfig = {
       schemaVersion: 1,
@@ -582,6 +850,13 @@ describe("GSM game provisioning runtime binding", () => {
       createdScene: true,
       updatedProfile: true,
     });
+    expect(mocks.reserveGameProvisioningBinding).toHaveBeenCalledWith(
+      externalRequest.externalId,
+      "Default",
+      "Arc the Lad II",
+      "Arc the Lad II - RetroArch",
+      "retroarch.exe"
+    );
     expect(mocks.createSceneWithCapture).toHaveBeenCalledWith({
       title: "Arc the Lad II - RetroArch",
       sceneName: "Arc the Lad II",
