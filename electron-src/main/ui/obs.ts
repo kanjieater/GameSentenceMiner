@@ -3191,8 +3191,9 @@ async function getExecutableNameFromSourceStrict(
     return null;
 }
 
-async function getWindowTitleFromSourceStrict(
-    obsSceneID: string
+async function getWindowTitleFromSourceInternal(
+    obsSceneID: string,
+    strictLivePropertyErrors: boolean
 ): Promise<string | undefined | null> {
     await getOBSConnection();
 
@@ -3206,27 +3207,38 @@ async function getWindowTitleFromSourceStrict(
 
         if (inputProperties.inputSettings?.window) {
             const windowValue = inputProperties.inputSettings.window as string;
-            const propertyItemsResponse = await callOBS(
-                'GetInputPropertiesListPropertyItems',
-                {
-                    inputName: item.sourceName as string,
-                    propertyName: 'window',
-                }
-            );
 
-            const match = propertyItemsResponse.propertyItems?.find(
-                (prop: any) => prop.itemValue === windowValue
-            );
+            try {
+                const propertyItemsResponse = await callOBS(
+                    'GetInputPropertiesListPropertyItems',
+                    {
+                        inputName: item.sourceName as string,
+                        propertyName: 'window',
+                    }
+                );
 
-            if (match?.itemName) {
-                const parsedTitle = (match.itemName as string)
-                    .split(':')
-                    .slice(1)
-                    .join(':')
-                    .trim();
-                if (parsedTitle) {
-                    return parsedTitle;
+                const match = propertyItemsResponse.propertyItems?.find(
+                    (prop: any) => prop.itemValue === windowValue
+                );
+
+                if (match?.itemName) {
+                    const parsedTitle = (match.itemName as string)
+                        .split(':')
+                        .slice(1)
+                        .join(':')
+                        .trim();
+                    if (parsedTitle) {
+                        return parsedTitle;
+                    }
                 }
+            } catch (error: any) {
+                if (strictLivePropertyErrors) {
+                    throw error;
+                }
+                logObsError(
+                    `Warning: Could not fetch live window title for source "${item.sourceName}":`,
+                    error?.message ?? error
+                );
             }
 
             return windowValue.split(':').at(0)?.trim();
@@ -3251,7 +3263,7 @@ export async function getExecutableNameFromSourceForProvisioning(
 export async function getWindowTitleFromSourceForProvisioning(
     obsSceneID: string
 ): Promise<string | undefined | null> {
-    return getWindowTitleFromSourceStrict(obsSceneID);
+    return getWindowTitleFromSourceInternal(obsSceneID, true);
 }
 
 export async function getExecutableNameFromSource(
@@ -3272,7 +3284,7 @@ export async function getWindowTitleFromSource(
     obsSceneID: string
 ): Promise<string | undefined | null> {
     try {
-        return await getWindowTitleFromSourceStrict(obsSceneID);
+        return await getWindowTitleFromSourceInternal(obsSceneID, false);
     } catch (error: any) {
         logObsError(
             `Error getting window title from source in scene "${obsSceneID}":`,
@@ -3671,7 +3683,7 @@ export async function suggestWindowSceneSwitcherRuleForProvisioning(
     sceneUuid: string
 ): Promise<{ titlePattern: string; executableName?: string } | null> {
     const [title, executableName] = await Promise.all([
-        getWindowTitleFromSourceStrict(sceneUuid),
+        getWindowTitleFromSourceInternal(sceneUuid, true),
         getExecutableNameFromSourceStrict(sceneUuid),
     ]);
     return buildSuggestedWindowSceneSwitcherRule(title, executableName);
