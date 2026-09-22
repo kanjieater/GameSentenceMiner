@@ -82,7 +82,7 @@ try {
         $ref = "detached"
     }
 
-    $dirty = [bool]((& git status --porcelain --untracked-files=no) | Select-Object -First 1)
+    $dirty = [bool]((& git status --porcelain --untracked-files=normal --ignore-submodules=none) | Select-Object -First 1)
     if ($LASTEXITCODE -ne 0) {
         throw "Unable to inspect git status."
     }
