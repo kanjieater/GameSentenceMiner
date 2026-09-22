@@ -54,6 +54,30 @@ describe("game provisioning command transport", () => {
     );
   });
 
+  it("rejects mixed token and legacy provisioning transports", () => {
+    const token = makeProvisioningToken({
+      displayName: "Arc the Lad II",
+      externalId: "playnite:token",
+      processId: 4242,
+    });
+
+    expect(
+      parseGameProvisioningCommand([
+        token,
+        "--ensure-game",
+        "Conflicting Game",
+        "--external-id",
+        "playnite:legacy",
+        "--pid",
+        "9999",
+      ])
+    ).toEqual({
+      kind: "invalid",
+      reason:
+        "Provisioning token transport cannot be combined with legacy --ensure-game arguments.",
+    });
+  });
+
   it("parses Playnite ensure-game argv", () => {
     expect(
       parseGameProvisioningCommand([
