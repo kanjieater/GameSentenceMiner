@@ -23,3 +23,20 @@
 - Use `{variable}` interpolation for dynamic values: `t("key", { name: value })`.
 - For module-scope constants (outside React components), store i18n key strings in a `labelKey` field or key-map object, then translate at render time with `t(item.labelKey)`.
 - See `docs/LOCALIZATION.md` for the full guide, key naming conventions, and code patterns.
+
+## Fork Windows Build / Deployment
+
+- For routine Windows testing of the `kanjieater/GameSentenceMiner` fork, prefer the GitHub Actions build in `.github/workflows/fork_windows_build.yml` instead of reproducing the full Python/Rust/Overlay/Electron packaging toolchain locally.
+- The workflow runs automatically for pull requests into `main` and pushes to `main`, and can be triggered manually for any branch.
+- It produces one commit-addressed artifact named `gsm-windows-<full commit sha>` containing:
+  - the unsigned Windows installer;
+  - a zipped `win-unpacked` build;
+  - Electron update metadata/blockmap when produced;
+  - `build-info.json` with the exact source commit.
+- From a Windows checkout, a low-level agent can fetch (and, if needed, trigger) the exact build for a branch with:
+  - `pwsh ./tools/deploy-fork-build.ps1 -Ref <branch>`
+- To install it:
+  - interactive: `pwsh ./tools/deploy-fork-build.ps1 -Ref <branch> -Install`
+  - silent NSIS install: `pwsh ./tools/deploy-fork-build.ps1 -Ref <branch> -Install -Silent`
+- The deploy helper resolves the requested remote ref to an exact commit, only accepts an artifact for that commit, waits for an in-progress build or triggers `workflow_dispatch` when needed, and verifies `build-info.json` before installation.
+- Fork CI artifacts are intentionally unsigned development builds. Do not reuse upstream SignPath/release credentials or publish fork development builds into the upstream release channel.
