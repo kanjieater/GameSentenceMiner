@@ -102,7 +102,8 @@ export interface GameProvisioningDependencies {
    * Implementations should no-op when the request has no externalId.
    */
   reserveProvisioning(
-    request: GameProvisioningRequest
+    request: GameProvisioningRequest,
+    target: ProvisioningCaptureTarget
   ): Promise<void> | void;
 
   /**
@@ -235,7 +236,10 @@ export async function ensureGameProvisioned(
     // Reserve durable ownership before the first scene mutation. If any later
     // write fails, a retry can safely recognize and finish this provisioning
     // attempt instead of treating its own same-name scene as a user collision.
-    await dependencies.reserveProvisioning(normalizedRequest);
+    await dependencies.reserveProvisioning(
+      normalizedRequest,
+      resolution.target
+    );
 
     const createdScene = await dependencies.createSceneWithCapture(
       normalizedRequest,
