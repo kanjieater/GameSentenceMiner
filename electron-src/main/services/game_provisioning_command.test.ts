@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  createGameProvisioningSingleInstanceData,
   dispatchGameProvisioningCommand,
+  getGameProvisioningSecondInstanceArgs,
   hasEnsureGameCommand,
   parseGameProvisioningCommand,
 } from "./game_provisioning_command.js";
@@ -222,6 +224,46 @@ describe("game provisioning command transport", () => {
     expect(ensureGame).toHaveBeenCalledTimes(2);
     expect(createCount).toBe(1);
     expect(maxActive).toBe(1);
+  });
+
+  it("preserves exact provisioning args through Electron additionalData", () => {
+    const args = [
+      "--ensure-game",
+      "Arc the Lad II",
+      "--external-id",
+      "playnite:abc",
+      "--pid",
+      "4242",
+    ];
+
+    const additionalData = createGameProvisioningSingleInstanceData(args);
+    expect(additionalData).toEqual({ gameProvisioningArgs: args });
+
+    expect(
+      getGameProvisioningSecondInstanceArgs(
+        ["GameSentenceMiner.exe", "--original-process-start-time=123"],
+        additionalData
+      )
+    ).toEqual(args);
+  });
+
+  it("falls back to the full Electron second-instance argv without slicing", () => {
+    const commandLine = [
+      "--ensure-game",
+      "Arc the Lad II",
+      "--external-id",
+      "playnite:abc",
+    ];
+
+    expect(
+      getGameProvisioningSecondInstanceArgs(commandLine, undefined)
+    ).toEqual(commandLine);
+  });
+
+  it("does not attach single-instance data for ordinary launches", () => {
+    expect(
+      createGameProvisioningSingleInstanceData(["GameSentenceMiner.exe"])
+    ).toBeUndefined();
   });
 
   it("uses the same dispatcher for startup or second-instance argv", async () => {
