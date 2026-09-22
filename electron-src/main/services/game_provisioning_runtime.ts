@@ -14,9 +14,13 @@ import {
   isOBSProvisioningNotReadyError,
   suggestWindowSceneSwitcherRule,
 } from "../ui/obs.js";
-import type { ObsSceneCaptureWindowSelection } from "../ui/obs-capture.js";
+import {
+  parseObsWindowValue,
+  type ObsSceneCaptureWindowSelection,
+} from "../ui/obs-capture.js";
 import {
   WINDOW_SCENE_SWITCHER_MIGRATION_VERSION,
+  normalizeExecutableName,
   type WindowSceneSwitcherCollection,
 } from "../../shared/window_scene_switcher.js";
 import { upsertGeneratedWindowSceneRule } from "./window_scene_switcher.js";
@@ -39,6 +43,65 @@ export type GameCaptureTargetResolver = (
 function sameName(left: string, right: string): boolean {
   return (
     left.trim().toLocaleLowerCase() === right.trim().toLocaleLowerCase()
+  );
+}
+
+interface ProvisioningCaptureFingerprint {
+  captureTitle: string;
+  executableName?: string;
+}
+
+function normalizeFingerprintTitle(value: string | undefined): string {
+  return (value ?? "").trim().toLocaleLowerCase();
+}
+
+function getTargetCaptureFingerprint(
+  target: ProvisioningCaptureTarget
+): ProvisioningCaptureFingerprint {
+  const captureTitle = (target.title || target.selection.title || "").trim();
+  const captureValues = [
+    target.selection.captureValues?.game_capture,
+    target.selection.captureValues?.window_capture,
+  ];
+
+  let executableName = "";
+  for (const value of captureValues) {
+    if (!value) {
+      continue;
+    }
+    const parsed = parseObsWindowValue(value);
+    executableName = normalizeExecutableName(parsed.executable);
+    if (executableName) {
+      break;
+    }
+  }
+
+  if (!captureTitle) {
+    throw new Error(
+      "Provisioning target has no stable capture title; refusing to reserve ownership."
+    );
+  }
+  if (target.selection.targetKind === "window" && !executableName) {
+    throw new Error(
+      "Window provisioning target has no executable identity; refusing to reserve ownership."
+    );
+  }
+
+  return {
+    captureTitle,
+    ...(executableName ? { executableName } : {}),
+  };
+}
+
+function fingerprintsMatch(
+  left: ProvisioningCaptureFingerprint,
+  right: ProvisioningCaptureFingerprint
+): boolean {
+  return (
+    normalizeFingerprintTitle(left.captureTitle) ===
+      normalizeFingerprintTitle(right.captureTitle) &&
+    normalizeExecutableName(left.executableName).toLocaleLowerCase() ===
+      normalizeExecutableName(right.executableName).toLocaleLowerCase()
   );
 }
 
@@ -155,6 +218,44 @@ async function prepareExistingProvisionedScene(
         );
         if (!scene) {
           return null;
+        }
+
+        if (!binding.captureTitle?.trim()) {
+          throw new Error(
+            `Pending provisioning binding for "${externalId}" has no capture fingerprint; refusing to claim same-name scene "${scene.name}".`
+          );
+        }
+
+        const actualCaptureTitle = await withProvisioningOBSReadiness(
+          "OBS pending capture inspection",
+          () => getWindowTitleFromSource(scene.id)
+        );
+        if (
+          !actualCaptureTitle?.trim() ||
+          normalizeFingerprintTitle(actualCaptureTitle) !==
+            normalizeFingerprintTitle(binding.captureTitle)
+        ) {
+          throw new Error(
+            `Pending provisioning binding for "${externalId}" does not match the capture in same-name scene "${scene.name}"; refusing to claim it.`
+          );
+        }
+
+        if (binding.executableName?.trim()) {
+          const suggestedRule = await withProvisioningOBSReadiness(
+            "OBS pending executable inspection",
+            () => suggestWindowSceneSwitcherRule(scene.id)
+          );
+          const actualExecutable = normalizeExecutableName(
+            suggestedRule?.executableName
+          ).toLocaleLowerCase();
+          const expectedExecutable = normalizeExecutableName(
+            binding.executableName
+          ).toLocaleLowerCase();
+          if (!actualExecutable || actualExecutable !== expectedExecutable) {
+            throw new Error(
+              `Pending provisioning binding for "${externalId}" does not match the executable in same-name scene "${scene.name}"; refusing to claim it.`
+            );
+          }
         }
       }
     } else {
@@ -274,18 +375,37 @@ export function createGsmGameProvisioningDependencies(
     upsertSceneLaunchProfile: async (profile) => {
       upsertSceneLaunchProfile(profile);
     },
-    reserveProvisioning: async (request) => {
+    reserveProvisioning: async (request, target) => {
       const externalId = request.externalId?.trim();
       if (!externalId) {
         return;
       }
 
       const collection = await getReadyActiveCollection();
+      const fingerprint = getTargetCaptureFingerprint(target);
       const existing = getGameProvisioningBinding(
         externalId,
         collection.collectionName
       );
       if (existing) {
+        if (!existing.pending) {
+          return;
+        }
+
+        if (
+          !existing.captureTitle?.trim() ||
+          !fingerprintsMatch(
+            {
+              captureTitle: existing.captureTitle,
+              executableName: existing.executableName,
+            },
+            fingerprint
+          )
+        ) {
+          throw new Error(
+            `Pending provisioning ownership for "${externalId}" does not match the newly resolved capture target; refusing to reuse it.`
+          );
+        }
         return;
       }
 
@@ -302,7 +422,9 @@ export function createGsmGameProvisioningDependencies(
       reserveGameProvisioningBinding(
         externalId,
         collection.collectionName,
-        request.displayName
+        request.displayName,
+        fingerprint.captureTitle,
+        fingerprint.executableName
       );
     },
     rememberProvisionedScene: async (request, scene) => {
