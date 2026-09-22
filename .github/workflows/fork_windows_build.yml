@@ -106,7 +106,7 @@ jobs:
         run: npm ci --prefer-offline --no-audit --fund=false
 
       - name: Test game provisioning transport
-        run: npx vitest run electron-src/main/services/game_provisioning_command.test.ts --config vitest.config.ts
+        run: npx vitest run electron-src/main/services/game_provisioning_command.test.ts electron-src/main/services/game_provisioning_inbox.test.ts --config vitest.config.ts
 
       - name: Build native package
         run: npm run build:native
