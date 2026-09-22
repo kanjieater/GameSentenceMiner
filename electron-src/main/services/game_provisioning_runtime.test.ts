@@ -46,9 +46,9 @@ vi.mock("../ui/obs.js", () => ({
   getOBSScenesForSceneSwitcher: mocks.getOBSScenesForSceneSwitcher,
   getCurrentOBSSceneCollectionName: mocks.getCurrentOBSSceneCollectionName,
   getWindowTitleFromSourceForProvisioning:
-    mocks.getWindowTitleFromSourceForProvisioningForProvisioning,
+    mocks.getWindowTitleFromSourceForProvisioning,
   suggestWindowSceneSwitcherRuleForProvisioning:
-    mocks.suggestWindowSceneSwitcherRuleForProvisioningForProvisioning,
+    mocks.suggestWindowSceneSwitcherRuleForProvisioning,
   isOBSProvisioningNotReadyError: mocks.isOBSProvisioningNotReadyError,
 }));
 
