@@ -159,6 +159,58 @@ beforeEach(() => {
 });
 
 describe('getGameInfoFromWindow', () => {
+    it('normalizes RetroArch identity and feeds that production identity into provisioning', async () => {
+        const { getGameInfoFromWindow } = await loadObsModule();
+        const { resolveForegroundCaptureTarget } =
+            await import('../services/game_provisioning_target_resolver.js');
+
+        const rawTitle = 'Arc the Lad II - RetroArch';
+        const normalized = getGameInfoFromWindow(rawTitle);
+
+        expect(normalized.sceneName).toBe('Arc the Lad II');
+        expect(rawTitle).toMatch(new RegExp(normalized.switcherRegex, 'i'));
+
+        const foreground = {
+            hwnd: '123',
+            pid: 4242,
+            title: rawTitle,
+            executableName: 'retroarch.exe',
+            capturedAt: 1,
+            sequence: 1,
+        };
+        const option = {
+            title: rawTitle,
+            suggestedSceneName: normalized.sceneName,
+            value: JSON.stringify([
+                'arc the lad ii - retroarch',
+                'retroarch',
+                'retroarch.exe',
+            ]),
+            targetKind: 'window' as const,
+            captureValues: {
+                window_capture:
+                    'Arc the Lad II - RetroArch:RetroArch:retroarch.exe',
+                game_capture:
+                    'Arc the Lad II - RetroArch:RetroArch:retroarch.exe',
+            },
+        };
+
+        expect(
+            resolveForegroundCaptureTarget(
+                {
+                    displayName: 'Arc the Lad II',
+                    processId: 4242,
+                    externalId: 'playnite:abc',
+                },
+                foreground,
+                [option]
+            )
+        ).toEqual({
+            status: 'resolved',
+            target: { title: rawTitle, selection: option },
+        });
+    });
+
     it('extracts game names from yuzu Early Access titles', async () => {
         const { getGameInfoFromWindow } = await loadObsModule();
         const rawTitle =

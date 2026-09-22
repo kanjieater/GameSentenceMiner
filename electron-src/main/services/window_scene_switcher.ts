@@ -830,6 +830,10 @@ export function configureWindowSceneSwitcherRuntime(
     }
 }
 
+export function getLatestForegroundWindowSnapshot(): ForegroundWindowSnapshot | null {
+    return latestForeground ? { ...latestForeground } : null;
+}
+
 export function handleForegroundWindowSnapshot(snapshot: ForegroundWindowSnapshot): void {
     if (!isWindows()) {
         return;

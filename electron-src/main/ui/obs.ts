@@ -265,6 +265,16 @@ const TITLE_MATCHERS: TitleMatcher[] = [
         getSwitcherPattern: (n) => `${escapeRegexCharacters(n.trim())}.*-.*(?:VisualBoyAdvance|Project64|Snes9x|Rosalie's Mupen).*`
     },
     {
+        name: 'RetroArch',
+        // Pattern: Game Name - RetroArch OR Game Name - RetroArch <version/details>
+        // Keep this explicit so provisioning can compare a stable game identity
+        // without falling back to unsafe substring matching.
+        pattern: /^(.+?)\s+-\s+RetroArch(?:\s+.*)?$/i,
+        getName: (m) => m[1].trim(),
+        getSwitcherPattern: (n) =>
+            '^' + escapeRegexCharacters(n.trim()) + '\\s+-\\s+RetroArch(?:\\s+.*)?'
+    },
+    {
         name: 'Generic Version Suffix',
         // Pattern: Game Name - Ver1.0.0 OR Game Name ver1.00
         // Kept at the bottom as a catch-all
@@ -2440,6 +2450,15 @@ function setOBSSceneSwitcherCallback() {
 }
 
 let obsIPCRegistered = false;
+let provisioningWindowListProvider: (() => Promise<ObsWindowOption[]>) | null = null;
+
+export async function getOBSWindowOptionsForProvisioning(): Promise<ObsWindowOption[]> {
+    await registerOBSIPC();
+    if (!provisioningWindowListProvider) {
+        throw new Error('OBS window enumeration is not ready for provisioning.');
+    }
+    return await provisioningWindowListProvider();
+}
 
 export async function registerOBSIPC() {
     if (obsIPCRegistered) {
@@ -3081,6 +3100,15 @@ export async function registerOBSIPC() {
             return { ...option, suggestedSceneName };
         });
     }
+
+    provisioningWindowListProvider = async () => {
+        if (!isWindows() && !isLinux()) {
+            return [];
+        }
+        await getOBSConnection();
+        await syncCaptureCardProbeInputsToStateOnce();
+        return withSuggestedSceneNames(await getWindowListFast());
+    };
 
     ipcMain.handle('obs.getWindows', async (_, options?: { quick?: boolean }) => {
         try {
