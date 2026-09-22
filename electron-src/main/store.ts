@@ -166,6 +166,8 @@ export interface GameProvisioningBinding {
     sceneId: string;
     sceneName: string;
     pending: boolean;
+    captureTitle?: string;
+    executableName?: string;
 }
 
 interface StoreConfig {
@@ -969,13 +971,22 @@ export function getGameProvisioningBinding(
 export function reserveGameProvisioningBinding(
     externalId: string,
     collectionName: string,
-    sceneName: string
+    sceneName: string,
+    captureTitle: string,
+    executableName?: string
 ): void {
     const normalizedExternalId = (externalId ?? "").trim();
     const normalizedCollectionName =
         normalizeProvisioningBindingCollectionName(collectionName);
     const normalizedSceneName = (sceneName ?? "").trim();
-    if (!normalizedExternalId || !normalizedCollectionName || !normalizedSceneName) {
+    const normalizedCaptureTitle = (captureTitle ?? "").trim();
+    const normalizedExecutableName = (executableName ?? "").trim();
+    if (
+        !normalizedExternalId ||
+        !normalizedCollectionName ||
+        !normalizedSceneName ||
+        !normalizedCaptureTitle
+    ) {
         return;
     }
 
@@ -995,6 +1006,8 @@ export function reserveGameProvisioningBinding(
         sceneId: "",
         sceneName: normalizedSceneName,
         pending: true,
+        captureTitle: normalizedCaptureTitle,
+        executableName: normalizedExecutableName || undefined,
     });
     store.set("gameProvisioningBindings", bindings);
 }
