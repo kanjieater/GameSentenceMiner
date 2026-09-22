@@ -1354,6 +1354,72 @@ describe('sceneHasVisibleOutput', () => {
     });
 });
 
+describe('window title source inspection compatibility', () => {
+    beforeEach(() => {
+        obsCallMock.mockReset();
+        obsConnectMock.mockReset();
+        obsDisconnectMock.mockReset();
+        obsOnMock.mockReset();
+        obsRemoveAllListenersMock.mockReset();
+        obsConnectMock.mockResolvedValue(undefined);
+        obsDisconnectMock.mockResolvedValue(undefined);
+    });
+
+    function mockWindowSourceWithLivePropertyFailure() {
+        obsCallMock.mockImplementation(
+            async (requestType: string, requestData?: any) => {
+                if (requestType === 'GetVersion') {
+                    return {};
+                }
+                if (requestType === 'GetSceneItemList') {
+                    return {
+                        sceneItems: [
+                            {
+                                sourceUuid: 'source-1',
+                                sourceName: 'Stored Game - Window Capture',
+                            },
+                        ],
+                    };
+                }
+                if (requestType === 'GetInputSettings') {
+                    return {
+                        inputSettings: {
+                            window:
+                                'Stored Game Title:Qt6QWindowIcon:stored-game.exe',
+                        },
+                    };
+                }
+                if (
+                    requestType === 'GetInputPropertiesListPropertyItems' &&
+                    requestData?.propertyName === 'window'
+                ) {
+                    throw new Error('live window list unavailable');
+                }
+                return {};
+            }
+        );
+    }
+
+    it('renderer-facing title lookup falls back to the stored window title', async () => {
+        const { getWindowTitleFromSource } = await loadObsModule();
+        mockWindowSourceWithLivePropertyFailure();
+
+        await expect(
+            getWindowTitleFromSource('scene-123')
+        ).resolves.toBe('Stored Game Title');
+    });
+
+    it('provisioning-facing title lookup propagates the same live-property failure', async () => {
+        const { getWindowTitleFromSourceForProvisioning } =
+            await loadObsModule();
+        mockWindowSourceWithLivePropertyFailure();
+
+        await expect(
+            getWindowTitleFromSourceForProvisioning('scene-123')
+        ).rejects.toThrow('live window list unavailable');
+    });
+});
+
 describe('linux xcomposite scene metadata', () => {
     beforeEach(() => {
         obsCallMock.mockReset();

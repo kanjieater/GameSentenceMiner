@@ -1724,6 +1724,14 @@ function isOBSInitializingError(error: unknown): boolean {
     return false;
 }
 
+export function isOBSProvisioningNotReadyError(error: unknown): boolean {
+    if (isOBSInitializingError(error) || isOBSTimeoutError(error)) {
+        return true;
+    }
+    const message = getObsErrorMessage(error).toLowerCase();
+    return message.includes('not connected');
+}
+
 function withTimeout<T>(
     operation: string,
     timeoutMs: number,
@@ -2096,7 +2104,7 @@ async function isOBSHealthy(): Promise<boolean> {
 }
 
 // Shared scene creation logic
-async function createSceneWithCapture(window: ObsSceneCaptureWindowSelection): Promise<void> {
+export async function createSceneWithCapture(window: ObsSceneCaptureWindowSelection): Promise<void> {
     if (!isWindows() && !isLinux()) {
         throw new Error(
             'Automatic OBS capture setup is currently only supported on Windows and Linux XComposite or PipeWire.'
@@ -3156,36 +3164,113 @@ export async function registerOBSIPC() {
         });
 }
 
+async function getExecutableNameFromSourceStrict(
+    obsSceneID: string
+): Promise<string | undefined | null> {
+    await getOBSConnection();
+
+    const sceneItems = await callOBS('GetSceneItemList', { sceneUuid: obsSceneID });
+    const candidateItems = sceneItems.sceneItems.filter(isVideoCaptureSceneItem);
+
+    for (const item of candidateItems.length ? candidateItems : sceneItems.sceneItems) {
+        const inputProperties = await callOBS('GetInputSettings', {
+            inputUuid: item.sourceUuid as string,
+        });
+        if (inputProperties.inputSettings?.window) {
+            const windowValue = inputProperties.inputSettings.window as string;
+            return windowValue.split(':').at(-1)?.trim();
+        }
+
+        if (inputProperties.inputSettings?.capture_window) {
+            const captureWindowValue = inputProperties.inputSettings
+                .capture_window as string;
+            return parseLinuxXCompositeWindowValue(captureWindowValue).windowClass || null;
+        }
+    }
+
+    return null;
+}
+
+async function getWindowTitleFromSourceInternal(
+    obsSceneID: string,
+    strictLivePropertyErrors: boolean
+): Promise<string | undefined | null> {
+    await getOBSConnection();
+
+    const sceneItems = await callOBS('GetSceneItemList', { sceneUuid: obsSceneID });
+    const candidateItems = sceneItems.sceneItems.filter(isVideoCaptureSceneItem);
+
+    for (const item of candidateItems.length ? candidateItems : sceneItems.sceneItems) {
+        const inputProperties = await callOBS('GetInputSettings', {
+            inputUuid: item.sourceUuid as string,
+        });
+
+        if (inputProperties.inputSettings?.window) {
+            const windowValue = inputProperties.inputSettings.window as string;
+
+            try {
+                const propertyItemsResponse = await callOBS(
+                    'GetInputPropertiesListPropertyItems',
+                    {
+                        inputName: item.sourceName as string,
+                        propertyName: 'window',
+                    }
+                );
+
+                const match = propertyItemsResponse.propertyItems?.find(
+                    (prop: any) => prop.itemValue === windowValue
+                );
+
+                if (match?.itemName) {
+                    const parsedTitle = (match.itemName as string)
+                        .split(':')
+                        .slice(1)
+                        .join(':')
+                        .trim();
+                    if (parsedTitle) {
+                        return parsedTitle;
+                    }
+                }
+            } catch (error: any) {
+                if (strictLivePropertyErrors) {
+                    throw error;
+                }
+                logObsError(
+                    `Warning: Could not fetch live window title for source "${item.sourceName}":`,
+                    error?.message ?? error
+                );
+            }
+
+            return windowValue.split(':').at(0)?.trim();
+        }
+
+        if (inputProperties.inputSettings?.capture_window) {
+            const captureWindowValue = inputProperties.inputSettings
+                .capture_window as string;
+            return parseLinuxXCompositeWindowValue(captureWindowValue).title || null;
+        }
+    }
+
+    return null;
+}
+
+export async function getExecutableNameFromSourceForProvisioning(
+    obsSceneID: string
+): Promise<string | undefined | null> {
+    return getExecutableNameFromSourceStrict(obsSceneID);
+}
+
+export async function getWindowTitleFromSourceForProvisioning(
+    obsSceneID: string
+): Promise<string | undefined | null> {
+    return getWindowTitleFromSourceInternal(obsSceneID, true);
+}
+
 export async function getExecutableNameFromSource(
     obsSceneID: string
 ): Promise<string | undefined | null> {
     try {
-        await getOBSConnection();
-
-        // Get the list of scene items for the given scene
-        const sceneItems = await callOBS('GetSceneItemList', { sceneUuid: obsSceneID });
-        const candidateItems = sceneItems.sceneItems.filter(isVideoCaptureSceneItem);
-
-        // Find the first input source with a window property
-        for (const item of candidateItems.length ? candidateItems : sceneItems.sceneItems) {
-            const inputProperties = await callOBS('GetInputSettings', {
-                inputUuid: item.sourceUuid as string,
-            });
-            if (inputProperties.inputSettings?.window) {
-                const windowValue = inputProperties.inputSettings.window as string;
-
-                return windowValue.split(':').at(-1)?.trim();
-            }
-
-            if (inputProperties.inputSettings?.capture_window) {
-                const captureWindowValue = inputProperties.inputSettings
-                    .capture_window as string;
-
-                return parseLinuxXCompositeWindowValue(captureWindowValue).windowClass || null;
-            }
-        }
-
-        return null;
+        return await getExecutableNameFromSourceStrict(obsSceneID);
     } catch (error: any) {
         logObsError(
             `Error getting executable name from source in scene "${obsSceneID}":`,
@@ -3199,60 +3284,7 @@ export async function getWindowTitleFromSource(
     obsSceneID: string
 ): Promise<string | undefined | null> {
     try {
-        await getOBSConnection();
-
-        // Get the list of scene items for the given scene
-        const sceneItems = await callOBS('GetSceneItemList', { sceneUuid: obsSceneID });
-        const candidateItems = sceneItems.sceneItems.filter(isVideoCaptureSceneItem);
-
-        // Find the first input source with a window property
-        for (const item of candidateItems.length ? candidateItems : sceneItems.sceneItems) {
-            const inputProperties = await callOBS('GetInputSettings', {
-                inputUuid: item.sourceUuid as string,
-            });
-
-            if (inputProperties.inputSettings?.window) {
-                const windowValue = inputProperties.inputSettings.window as string;
-
-                // Try to fetch the live window list for this input to get the current title
-                try {
-                    const propertyItemsResponse = await callOBS('GetInputPropertiesListPropertyItems', {
-                        inputName: item.sourceName as string,
-                        propertyName: 'window',
-                    });
-
-                    const match = propertyItemsResponse.propertyItems?.find(
-                        (prop: any) => prop.itemValue === windowValue
-                    );
-
-                    if (match?.itemName) {
-                        const parsedTitle = (match.itemName as string)
-                            .split(':')
-                            .slice(1)
-                            .join(':')
-                            .trim();
-                        if (parsedTitle) return parsedTitle;
-                    }
-                } catch (propErr: any) {
-                    // If fetching live properties fails, fall back to stored value
-                    logObsError(
-                        `Warning: Could not fetch live window title for source "${item.sourceName}":`,
-                        propErr?.message ?? propErr
-                    );
-                }
-
-                // Fallback to the stored (possibly stale) window title
-                return windowValue.split(':').at(0)?.trim();
-            }
-
-            if (inputProperties.inputSettings?.capture_window) {
-                const captureWindowValue = inputProperties.inputSettings
-                    .capture_window as string;
-                return parseLinuxXCompositeWindowValue(captureWindowValue).title || null;
-            }
-        }
-
-        return null;
+        return await getWindowTitleFromSourceInternal(obsSceneID, false);
     } catch (error: any) {
         logObsError(
             `Error getting window title from source in scene "${obsSceneID}":`,
@@ -3634,13 +3666,10 @@ export async function getCurrentOBSSceneCollectionName(): Promise<string> {
     return String(response?.currentSceneCollectionName ?? '').trim();
 }
 
-export async function suggestWindowSceneSwitcherRule(
-    sceneUuid: string
-): Promise<{ titlePattern: string; executableName?: string } | null> {
-    const [title, executableName] = await Promise.all([
-        getWindowTitleFromSource(sceneUuid),
-        getExecutableNameFromSource(sceneUuid),
-    ]);
+function buildSuggestedWindowSceneSwitcherRule(
+    title: string | undefined | null,
+    executableName: string | undefined | null
+): { titlePattern: string; executableName?: string } | null {
     if (!title?.trim()) {
         return null;
     }
@@ -3648,6 +3677,26 @@ export async function suggestWindowSceneSwitcherRule(
         titlePattern: getGameInfoFromWindow(title.trim()).switcherRegex,
         executableName: executableName?.trim() || undefined,
     };
+}
+
+export async function suggestWindowSceneSwitcherRuleForProvisioning(
+    sceneUuid: string
+): Promise<{ titlePattern: string; executableName?: string } | null> {
+    const [title, executableName] = await Promise.all([
+        getWindowTitleFromSourceInternal(sceneUuid, true),
+        getExecutableNameFromSourceStrict(sceneUuid),
+    ]);
+    return buildSuggestedWindowSceneSwitcherRule(title, executableName);
+}
+
+export async function suggestWindowSceneSwitcherRule(
+    sceneUuid: string
+): Promise<{ titlePattern: string; executableName?: string } | null> {
+    const [title, executableName] = await Promise.all([
+        getWindowTitleFromSource(sceneUuid),
+        getExecutableNameFromSource(sceneUuid),
+    ]);
+    return buildSuggestedWindowSceneSwitcherRule(title, executableName);
 }
 
 export async function renameOBSScene(

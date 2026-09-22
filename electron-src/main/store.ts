@@ -160,6 +160,16 @@ interface FrontPageState {
     ocrConfigs?: OCRGame[];
 }
 
+export interface GameProvisioningBinding {
+    externalId: string;
+    collectionName: string;
+    sceneId: string;
+    sceneName: string;
+    pending: boolean;
+    captureTitle?: string;
+    executableName?: string;
+}
+
 interface StoreConfig {
     frontPageState: FrontPageState;
     yuzu: YuzuConfig;
@@ -169,6 +179,7 @@ interface StoreConfig {
     textractorPath32: string;
     lunaTranslatorPath: string;
     sceneLaunchProfiles: SceneLaunchProfile[];
+    gameProvisioningBindings: GameProvisioningBinding[];
     sceneLaunchProfilesMigrated: boolean;
     sceneLaunchAgentScriptsMigrated: boolean;
     startConsoleMinimized: boolean;
@@ -232,6 +243,7 @@ export const store = new Store<StoreConfig>({
         textractorPath32: "",
         lunaTranslatorPath: "",
         sceneLaunchProfiles: [],
+        gameProvisioningBindings: [],
         sceneLaunchProfilesMigrated: false,
         sceneLaunchAgentScriptsMigrated: false,
         startConsoleMinimized: false,
@@ -932,6 +944,107 @@ export function getWindowSceneSwitcherConfig(): WindowSceneSwitcherConfig {
 
 export function setWindowSceneSwitcherConfig(config: WindowSceneSwitcherConfig): void {
     store.set("windowSceneSwitcher", config);
+}
+
+function normalizeProvisioningBindingCollectionName(collectionName: string): string {
+    return (collectionName ?? "").trim();
+}
+
+export function getGameProvisioningBinding(
+    externalId: string,
+    collectionName: string
+): GameProvisioningBinding | null {
+    const normalizedExternalId = (externalId ?? "").trim();
+    const normalizedCollectionName =
+        normalizeProvisioningBindingCollectionName(collectionName);
+    if (!normalizedExternalId || !normalizedCollectionName) {
+        return null;
+    }
+    const bindings = store.get("gameProvisioningBindings", []);
+    return bindings.find(
+        (binding) =>
+            binding.externalId === normalizedExternalId &&
+            binding.collectionName === normalizedCollectionName
+    ) ?? null;
+}
+
+export function reserveGameProvisioningBinding(
+    externalId: string,
+    collectionName: string,
+    sceneName: string,
+    captureTitle: string,
+    executableName?: string
+): void {
+    const normalizedExternalId = (externalId ?? "").trim();
+    const normalizedCollectionName =
+        normalizeProvisioningBindingCollectionName(collectionName);
+    const normalizedSceneName = (sceneName ?? "").trim();
+    const normalizedCaptureTitle = (captureTitle ?? "").trim();
+    const normalizedExecutableName = (executableName ?? "").trim();
+    if (
+        !normalizedExternalId ||
+        !normalizedCollectionName ||
+        !normalizedSceneName ||
+        !normalizedCaptureTitle
+    ) {
+        return;
+    }
+
+    const bindings = store.get("gameProvisioningBindings", []);
+    const index = bindings.findIndex(
+        (binding) =>
+            binding.externalId === normalizedExternalId &&
+            binding.collectionName === normalizedCollectionName
+    );
+    if (index >= 0) {
+        return;
+    }
+
+    bindings.push({
+        externalId: normalizedExternalId,
+        collectionName: normalizedCollectionName,
+        sceneId: "",
+        sceneName: normalizedSceneName,
+        pending: true,
+        captureTitle: normalizedCaptureTitle,
+        executableName: normalizedExecutableName || undefined,
+    });
+    store.set("gameProvisioningBindings", bindings);
+}
+
+export function upsertGameProvisioningBinding(
+    externalId: string,
+    collectionName: string,
+    scene: ObsScene
+): void {
+    const normalizedExternalId = (externalId ?? "").trim();
+    const normalizedCollectionName =
+        normalizeProvisioningBindingCollectionName(collectionName);
+    const sceneId = (scene?.id ?? "").trim();
+    const sceneName = (scene?.name ?? "").trim();
+    if (!normalizedExternalId || !normalizedCollectionName || !sceneId || !sceneName) {
+        return;
+    }
+
+    const bindings = store.get("gameProvisioningBindings", []);
+    const next: GameProvisioningBinding = {
+        externalId: normalizedExternalId,
+        collectionName: normalizedCollectionName,
+        sceneId,
+        sceneName,
+        pending: false,
+    };
+    const index = bindings.findIndex(
+        (binding) =>
+            binding.externalId === normalizedExternalId &&
+            binding.collectionName === normalizedCollectionName
+    );
+    if (index >= 0) {
+        bindings[index] = next;
+    } else {
+        bindings.push(next);
+    }
+    store.set("gameProvisioningBindings", bindings);
 }
 
 export function getSceneLaunchProfiles(): SceneLaunchProfile[] {
