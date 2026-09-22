@@ -2673,6 +2673,7 @@ function scheduleGameProvisioningInboxDrain(): void {
                         path.basename(request.path) +
                         '.'
                     );
+                    await app.whenReady();
                     await processCommandLineArgs(request.args);
                 } catch (error) {
                     log.warn(
@@ -2692,7 +2693,6 @@ function startGameProvisioningInboxWatcher(): void {
     }
 
     const inboxDir = ensureGameProvisioningInbox(BASE_DIR);
-    scheduleGameProvisioningInboxDrain();
     gameProvisioningInboxWatcher = fs.watch(inboxDir, (_eventType, filename) => {
         if (!filename || !filename.toString().endsWith('.json')) {
             return;
@@ -2702,6 +2702,7 @@ function startGameProvisioningInboxWatcher(): void {
     gameProvisioningInboxWatcher.on('error', (error) => {
         log.warn('[GameProvisioning] Provisioning inbox watcher failed:', error);
     });
+    scheduleGameProvisioningInboxDrain();
 }
 
 function stopGameProvisioningInboxWatcher(): void {
