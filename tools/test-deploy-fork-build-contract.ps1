@@ -53,7 +53,7 @@ function global:gh {
     }
 
     if (
-        $argv.Count -ge 3 -and
+        $argv.Count -ge 2 -and
         $argv[0] -eq "api" -and
         $argv[1] -eq "repos/$repo/actions/runs/100/artifacts"
     ) {
@@ -65,7 +65,7 @@ function global:gh {
     }
 
     if (
-        $argv.Count -ge 3 -and
+        $argv.Count -ge 2 -and
         $argv[0] -eq "api" -and
         $argv[1] -eq "repos/$repo/actions/runs/200/artifacts"
     ) {
