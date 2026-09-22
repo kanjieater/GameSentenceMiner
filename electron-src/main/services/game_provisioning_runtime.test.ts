@@ -21,7 +21,7 @@ function readySwitcherConfig(rules: any[] = []) {
 
 let scenes: Array<{ id: string; name: string }> = [];
 let profile: any = null;
-let binding: any = null;
+let bindings: any[] = [];
 let collectionName = "Default";
 let switcherConfig: any = readySwitcherConfig();
 
@@ -83,7 +83,7 @@ describe("GSM game provisioning runtime binding", () => {
   beforeEach(() => {
     scenes = [];
     profile = null;
-    binding = null;
+    bindings = [];
     collectionName = "Default";
     switcherConfig = readySwitcherConfig();
     vi.clearAllMocks();
@@ -111,10 +111,11 @@ describe("GSM game provisioning runtime binding", () => {
     });
     mocks.getGameProvisioningBinding.mockImplementation(
       (externalId: string, requestedCollectionName: string) =>
-        binding?.externalId === externalId &&
-        binding?.collectionName === requestedCollectionName
-          ? binding
-          : null
+        bindings.find(
+          (binding) =>
+            binding.externalId === externalId &&
+            binding.collectionName === requestedCollectionName
+        ) ?? null
     );
     mocks.getSceneLaunchProfileForScene.mockImplementation(() => profile);
     mocks.getWindowSceneSwitcherConfig.mockImplementation(
@@ -124,16 +125,25 @@ describe("GSM game provisioning runtime binding", () => {
       (
         externalId: string,
         requestedCollectionName: string,
-        sceneName: string
+        sceneName: string,
+        captureTitle: string,
+        executableName?: string
       ) => {
-        if (!binding) {
-          binding = {
+        const existing = bindings.find(
+          (binding) =>
+            binding.externalId === externalId &&
+            binding.collectionName === requestedCollectionName
+        );
+        if (!existing) {
+          bindings.push({
             externalId,
             collectionName: requestedCollectionName,
             sceneId: "",
             sceneName,
             pending: true,
-          };
+            captureTitle,
+            executableName,
+          });
         }
       }
     );
@@ -143,13 +153,23 @@ describe("GSM game provisioning runtime binding", () => {
         requestedCollectionName: string,
         boundScene: { id: string; name: string }
       ) => {
-        binding = {
+        const next = {
           externalId,
           collectionName: requestedCollectionName,
           sceneId: boundScene.id,
           sceneName: boundScene.name,
           pending: false,
         };
+        const index = bindings.findIndex(
+          (binding) =>
+            binding.externalId === externalId &&
+            binding.collectionName === requestedCollectionName
+        );
+        if (index >= 0) {
+          bindings[index] = next;
+        } else {
+          bindings.push(next);
+        }
       }
     );
   });
@@ -322,12 +342,12 @@ describe("GSM game provisioning runtime binding", () => {
   it("follows an external-id binding across a scene rename", async () => {
     const renamedScene = { id: scene.id, name: "Arc the Lad II Renamed" };
     scenes = [renamedScene];
-    binding = {
+    bindings = [{
       externalId: externalRequest.externalId,
       collectionName: "Default",
       sceneId: scene.id,
       sceneName: scene.name,
-    };
+    }];
     profile = {
       sceneId: renamedScene.id,
       sceneName: renamedScene.name,
@@ -369,12 +389,12 @@ describe("GSM game provisioning runtime binding", () => {
 
   it("reuses an external-id binding without a live PID/window lookup", async () => {
     scenes = [scene];
-    binding = {
+    bindings = [{
       externalId: "playnite:arc-the-lad-ii",
       collectionName: "Default",
       sceneId: scene.id,
       sceneName: scene.name,
-    };
+    }];
     profile = {
       sceneId: scene.id,
       sceneName: scene.name,
