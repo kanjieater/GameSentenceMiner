@@ -3,7 +3,9 @@ param(
     [string]$Repo = "kanjieater/GameSentenceMiner",
     [string]$Destination = "",
     [switch]$Install,
-    [switch]$Silent
+    [switch]$Silent,
+    [ValidateRange(0, 60)]
+    [int]$PollIntervalSeconds = 2
 )
 
 Set-StrictMode -Version Latest
@@ -120,7 +122,7 @@ if (-not $run) {
     }
 
     for ($attempt = 0; $attempt -lt 45; $attempt += 1) {
-        Start-Sleep -Seconds 2
+        Start-Sleep -Seconds $PollIntervalSeconds
         $candidate = Get-MatchingRun
         if (
             $candidate -and
