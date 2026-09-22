@@ -28,7 +28,8 @@ $requiredSnippets = @(
     "npm run verify:overlay-package",
     "Compress-Archive",
     'builder = "local-windows"',
-    'signed = $false'
+    'signed = $false',
+    "git status --porcelain --untracked-files=normal --ignore-submodules=none"
 )
 
 foreach ($snippet in $requiredSnippets) {
