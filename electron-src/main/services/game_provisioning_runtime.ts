@@ -222,13 +222,14 @@ async function prepareExistingProvisionedScene(
 
         if (!binding.captureTitle?.trim()) {
           throw new Error(
-            `Pending provisioning binding for "${externalId}" has no capture fingerprint; refusing to claim same-name scene "${scene.name}".`
+            `Pending provisioning binding for "${externalId}" has no capture fingerprint; refusing to claim same-name scene "${existingScene.name}".`
           );
         }
 
+        const pendingScene = scene;
         const actualCaptureTitle = await withProvisioningOBSReadiness(
           "OBS pending capture inspection",
-          () => getWindowTitleFromSourceForProvisioning(scene.id)
+          () => getWindowTitleFromSourceForProvisioning(pendingScene.id)
         );
         if (
           !actualCaptureTitle?.trim() ||
@@ -236,14 +237,14 @@ async function prepareExistingProvisionedScene(
             normalizeFingerprintTitle(binding.captureTitle)
         ) {
           throw new Error(
-            `Pending provisioning binding for "${externalId}" does not match the capture in same-name scene "${scene.name}"; refusing to claim it.`
+            `Pending provisioning binding for "${externalId}" does not match the capture in same-name scene "${existingScene.name}"; refusing to claim it.`
           );
         }
 
         if (binding.executableName?.trim()) {
           const suggestedRule = await withProvisioningOBSReadiness(
             "OBS pending executable inspection",
-            () => suggestWindowSceneSwitcherRuleForProvisioning(scene.id)
+            () => suggestWindowSceneSwitcherRuleForProvisioning(pendingScene.id)
           );
           const actualExecutable = normalizeExecutableName(
             suggestedRule?.executableName
@@ -253,7 +254,7 @@ async function prepareExistingProvisionedScene(
           ).toLocaleLowerCase();
           if (!actualExecutable || actualExecutable !== expectedExecutable) {
             throw new Error(
-              `Pending provisioning binding for "${externalId}" does not match the executable in same-name scene "${scene.name}"; refusing to claim it.`
+              `Pending provisioning binding for "${externalId}" does not match the executable in same-name scene "${existingScene.name}"; refusing to claim it.`
             );
           }
         }
@@ -278,35 +279,36 @@ async function prepareExistingProvisionedScene(
     }
   }
 
+  const existingScene = scene;
   const captureTitle = await withProvisioningOBSReadiness(
     "OBS capture inspection",
-    () => getWindowTitleFromSourceForProvisioning(scene.id)
+    () => getWindowTitleFromSourceForProvisioning(existingScene.id)
   );
   if (!captureTitle?.trim()) {
     throw new Error(
-      `A scene named "${scene.name}" already exists but has no reusable window capture; refusing to rebuild it automatically.`
+      `A scene named "${existingScene.name}" already exists but has no reusable window capture; refusing to rebuild it automatically.`
     );
   }
 
   const existingRule = collection.rules.find(
-    (candidate) => candidate.sceneUuid === scene.id
+    (candidate) => candidate.sceneUuid === existingScene.id
   );
   if (existingRule) {
     if (!existingRule.enabled) {
       throw new Error(
-        `The saved scene-switcher rule for "${scene.name}" is disabled; refusing to re-enable a user-disabled rule automatically.`
+        `The saved scene-switcher rule for "${existingScene.name}" is disabled; refusing to re-enable a user-disabled rule automatically.`
       );
     }
-    return { scene, changed: false };
+    return { scene: existingScene, changed: false };
   }
 
   const suggestedRule = await withProvisioningOBSReadiness(
     "OBS scene-switcher rule inspection",
-    () => suggestWindowSceneSwitcherRuleForProvisioning(scene.id)
+    () => suggestWindowSceneSwitcherRuleForProvisioning(existingScene.id)
   );
   if (!suggestedRule?.titlePattern) {
     throw new Error(
-      `GSM could not derive a scene-switcher rule for existing scene "${scene.name}".`
+      `GSM could not derive a scene-switcher rule for existing scene "${existingScene.name}".`
     );
   }
 
@@ -314,14 +316,14 @@ async function prepareExistingProvisionedScene(
     collectionName,
     collection.collectionFileName,
     {
-      sceneUuid: scene.id,
-      sceneName: scene.name,
+      sceneUuid: existingScene.id,
+      sceneName: existingScene.name,
       titlePattern: suggestedRule.titlePattern,
       executableName: suggestedRule.executableName,
     }
   );
 
-  return { scene, changed: true };
+  return { scene: existingScene, changed: true };
 }
 
 async function createProvisionedScene(
