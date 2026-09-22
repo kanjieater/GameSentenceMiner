@@ -7,8 +7,8 @@ $repo = "kanjieater/GameSentenceMiner"
 $ref = "feature/test"
 $destination = Join-Path $PSScriptRoot ".tmp-deploy-contract"
 
-$script:workflowTriggered = $false
-$script:runListCalls = 0
+$global:mockWorkflowTriggered = $false
+$global:mockRunListCalls = 0
 
 function global:gh {
     $global:LASTEXITCODE = 0
@@ -25,8 +25,8 @@ function global:gh {
     }
 
     if ($argv.Count -ge 2 -and $argv[0] -eq "run" -and $argv[1] -eq "list") {
-        $script:runListCalls += 1
-        if ($script:runListCalls -eq 1) {
+        $global:mockRunListCalls += 1
+        if ($global:mockRunListCalls -eq 1) {
             @(
                 [ordered]@{
                     databaseId = 100
@@ -83,7 +83,7 @@ function global:gh {
     }
 
     if ($argv.Count -ge 2 -and $argv[0] -eq "workflow" -and $argv[1] -eq "run") {
-        $script:workflowTriggered = $true
+        $global:mockWorkflowTriggered = $true
         return
     }
 
@@ -130,11 +130,11 @@ try {
         -Destination $destination `
         -PollIntervalSeconds 0
 
-    if (-not $script:workflowTriggered) {
+    if (-not $global:mockWorkflowTriggered) {
         throw "Expected missing/expired historical artifact to trigger a replacement workflow run."
     }
 
-    if ($script:runListCalls -lt 2) {
+    if ($global:mockRunListCalls -lt 2) {
         throw "Expected helper to re-query workflow runs after triggering replacement build."
     }
 
@@ -145,6 +145,8 @@ try {
     Write-Host "deploy-fork-build contract test passed."
 }
 finally {
+    Remove-Variable mockWorkflowTriggered -Scope Global -ErrorAction SilentlyContinue
+    Remove-Variable mockRunListCalls -Scope Global -ErrorAction SilentlyContinue
     Remove-Item Function:\gh -ErrorAction SilentlyContinue
     if (Test-Path $destination) {
         Remove-Item -LiteralPath $destination -Recurse -Force
