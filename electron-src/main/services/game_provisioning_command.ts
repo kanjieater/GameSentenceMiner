@@ -12,6 +12,14 @@ export interface GameProvisioningSingleInstanceData {
   gameProvisioningArgs?: string[];
 }
 
+export const GAME_PROVISIONING_TOKEN_PREFIX = "gsm-provision-v1-";
+
+interface EncodedGameProvisioningPayload {
+  displayName: string;
+  externalId: string;
+  processId?: number;
+}
+
 export function createGameProvisioningSingleInstanceData(
   args: string[]
 ): GameProvisioningSingleInstanceData | undefined {
@@ -60,13 +68,97 @@ function collectFlagValues(args: string[], flag: string): string[] {
   return values;
 }
 
+function parseEncodedProvisioningToken(
+  token: string
+): ParsedGameProvisioningCommand {
+  const encoded = token.slice(GAME_PROVISIONING_TOKEN_PREFIX.length);
+  if (!encoded) {
+    return {
+      kind: "invalid",
+      reason: "Provisioning token payload is empty.",
+    };
+  }
+
+  try {
+    const normalized = encoded.replace(/-/g, "+").replace(/_/g, "/");
+    const padded =
+      normalized + "=".repeat((4 - (normalized.length % 4)) % 4);
+    const decoded = Buffer.from(padded, "base64").toString("utf8");
+    const payload = JSON.parse(decoded) as Partial<EncodedGameProvisioningPayload>;
+
+    if (
+      typeof payload.displayName !== "string" ||
+      !payload.displayName.trim() ||
+      typeof payload.externalId !== "string" ||
+      !payload.externalId.trim()
+    ) {
+      return {
+        kind: "invalid",
+        reason:
+          "Provisioning token requires non-empty displayName and externalId values.",
+      };
+    }
+
+    let processId: number | undefined;
+    if (payload.processId !== undefined) {
+      if (!Number.isInteger(payload.processId) || payload.processId <= 0) {
+        return {
+          kind: "invalid",
+          reason:
+            "Provisioning token processId must be a positive integer when supplied.",
+        };
+      }
+      processId = payload.processId;
+    }
+
+    return {
+      kind: "ensure-game",
+      request: {
+        displayName: payload.displayName.trim(),
+        externalId: payload.externalId.trim(),
+        ...(processId ? { processId } : {}),
+        defaultMode: "ocr",
+      },
+    };
+  } catch {
+    return {
+      kind: "invalid",
+      reason: "Provisioning token payload is not valid base64url JSON.",
+    };
+  }
+}
+
 export function hasEnsureGameCommand(args: string[]): boolean {
-  return args.includes("--ensure-game");
+  return (
+    args.includes("--ensure-game") ||
+    args.some((arg) => arg.startsWith(GAME_PROVISIONING_TOKEN_PREFIX))
+  );
 }
 
 export function parseGameProvisioningCommand(
   args: string[]
 ): ParsedGameProvisioningCommand {
+  const encodedTokens = args.filter((arg) =>
+    arg.startsWith(GAME_PROVISIONING_TOKEN_PREFIX)
+  );
+  const hasLegacyEnsureGame = args.includes("--ensure-game");
+  if (encodedTokens.length > 0) {
+    if (hasLegacyEnsureGame) {
+      return {
+        kind: "invalid",
+        reason:
+          "Provisioning token transport cannot be combined with legacy --ensure-game arguments.",
+      };
+    }
+    if (encodedTokens.length !== 1) {
+      return {
+        kind: "invalid",
+        reason: "Exactly one provisioning token may be supplied.",
+      };
+    }
+    return parseEncodedProvisioningToken(encodedTokens[0]);
+  }
+
   const names = collectFlagValues(args, "--ensure-game");
   if (names.length === 0) {
     return { kind: "none" };

@@ -2,12 +2,82 @@ import { describe, expect, it, vi } from "vitest";
 import {
   createGameProvisioningSingleInstanceData,
   dispatchGameProvisioningCommand,
+  GAME_PROVISIONING_TOKEN_PREFIX,
   getGameProvisioningSecondInstanceArgs,
   hasEnsureGameCommand,
   parseGameProvisioningCommand,
 } from "./game_provisioning_command.js";
 
+function makeProvisioningToken(payload: object): string {
+  return (
+    GAME_PROVISIONING_TOKEN_PREFIX +
+    Buffer.from(JSON.stringify(payload), "utf8")
+      .toString("base64")
+      .replace(/\+/g, "-")
+      .replace(/\//g, "_")
+      .replace(/=+$/g, "")
+  );
+}
+
 describe("game provisioning command transport", () => {
+  it("parses the single-token provisioning transport", () => {
+    const token = makeProvisioningToken({
+      displayName: "Arc the Lad II",
+      externalId: "playnite:abc",
+      processId: 4242,
+    });
+
+    expect(parseGameProvisioningCommand([token])).toEqual({
+      kind: "ensure-game",
+      request: {
+        displayName: "Arc the Lad II",
+        externalId: "playnite:abc",
+        processId: 4242,
+        defaultMode: "ocr",
+      },
+    });
+    expect(hasEnsureGameCommand([token])).toBe(true);
+    expect(createGameProvisioningSingleInstanceData([token])).toEqual({
+      gameProvisioningArgs: [token],
+    });
+  });
+
+  it("rejects malformed single-token provisioning payloads", () => {
+    expect(
+      parseGameProvisioningCommand([
+        GAME_PROVISIONING_TOKEN_PREFIX + "not-valid-json",
+      ])
+    ).toEqual(
+      expect.objectContaining({
+        kind: "invalid",
+      })
+    );
+  });
+
+  it("rejects mixed token and legacy provisioning transports", () => {
+    const token = makeProvisioningToken({
+      displayName: "Arc the Lad II",
+      externalId: "playnite:token",
+      processId: 4242,
+    });
+
+    expect(
+      parseGameProvisioningCommand([
+        token,
+        "--ensure-game",
+        "Conflicting Game",
+        "--external-id",
+        "playnite:legacy",
+        "--pid",
+        "9999",
+      ])
+    ).toEqual({
+      kind: "invalid",
+      reason:
+        "Provisioning token transport cannot be combined with legacy --ensure-game arguments.",
+    });
+  });
+
   it("parses Playnite ensure-game argv", () => {
     expect(
       parseGameProvisioningCommand([
