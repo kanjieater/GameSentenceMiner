@@ -86,6 +86,7 @@ import {
     getCurrentOBSSceneCollectionName,
     getCurrentScene,
     getOBSScenesForSceneSwitcher,
+    getOBSWindowOptionsForProvisioning,
     isOBSConnected,
     launchOBSFromElectron,
     setOBSScene,
@@ -95,10 +96,16 @@ import {
 } from './ui/obs.js';
 import {
     configureWindowSceneSwitcherRuntime,
+    getLatestForegroundWindowSnapshot,
     handleForegroundWindowSnapshot,
     setForegroundWindowHookStatus,
     shutdownWindowSceneSwitcher,
 } from './services/window_scene_switcher.js';
+import {
+    dispatchGameProvisioningCommand,
+    hasEnsureGameCommand,
+} from './services/game_provisioning_command.js';
+import { ensureGameProvisionedWithRetry } from './services/game_provisioning_retry.js';
 import type {
     ForegroundWindowSnapshot,
     WindowSceneSwitcherHookStatus,
@@ -2551,8 +2558,58 @@ async function ensureAndRunGSM(
     }
 }
 
-async function processArgsAndStartSettings() {
-    const args = process.argv.slice(1);
+const gameProvisioningRetryDependencies = {
+    isSupported: isWindows,
+    getForegroundSnapshot: getLatestForegroundWindowSnapshot,
+    getWindowOptions: getOBSWindowOptionsForProvisioning,
+};
+
+async function processGameProvisioningArgs(args: string[]): Promise<void> {
+    const dispatched = await dispatchGameProvisioningCommand(
+        args,
+        async (request) =>
+            await ensureGameProvisionedWithRetry(
+                request,
+                gameProvisioningRetryDependencies
+            )
+    );
+
+    if (!dispatched.handled) {
+        return;
+    }
+    if ('error' in dispatched) {
+        console.warn('[GameProvisioning] Invalid ensure-game command:', dispatched.error);
+        return;
+    }
+
+    const result = dispatched.result;
+    if (
+        result.status === 'already-configured' ||
+        result.status === 'provisioned'
+    ) {
+        console.log(
+            '[GameProvisioning] ' +
+            result.status +
+            ' scene=' +
+            JSON.stringify(result.scene.name) +
+            ' createdScene=' +
+            result.createdScene +
+            ' updatedProfile=' +
+            result.updatedProfile
+        );
+        return;
+    }
+
+    console.warn(
+        '[GameProvisioning] ' +
+        result.status +
+        (result.reason ? ': ' + result.reason : '')
+    );
+}
+
+async function processCommandLineArgs(args: string[]): Promise<void> {
+    await processGameProvisioningArgs(args);
+
     let gameName: string | undefined;
     let runOCR = false;
 
@@ -2578,6 +2635,10 @@ async function processArgsAndStartSettings() {
     if (runOCR) {
         await startOCR();
     }
+}
+
+async function processArgsAndStartSettings() {
+    await processCommandLineArgs(process.argv.slice(1));
 
     if (getRunOverlayOnStartup()) {
         runOverlayWithSource('startup');
@@ -2604,16 +2665,39 @@ if (process.platform === 'darwin') {
 }
 
 if (!app.requestSingleInstanceLock()) {
+    const forwardedArgs = process.argv.slice(1);
     app.whenReady().then(() => {
-        dialog.showMessageBoxSync({
-            type: 'warning',
-            title: 'GSM Running',
-            message: 'Another instance of GSM is already running.',
-            buttons: ['OK'],
-        });
+        if (!hasEnsureGameCommand(forwardedArgs)) {
+            dialog.showMessageBoxSync({
+                type: 'warning',
+                title: 'GSM Running',
+                message: 'Another instance of GSM is already running.',
+                buttons: ['OK'],
+            });
+        }
         app.quit();
     });
 } else {
+    app.on('second-instance', (_event, commandLine) => {
+        const forwardedArgs = commandLine.slice(1);
+        if (!hasEnsureGameCommand(forwardedArgs)) {
+            mainWindow?.show();
+            mainWindow?.focus();
+            return;
+        }
+
+        void app.whenReady()
+            .then(async () => {
+                await processCommandLineArgs(forwardedArgs);
+            })
+            .catch((error) =>
+                console.warn(
+                    '[GameProvisioning] Failed to process second-instance args:',
+                    error
+                )
+            );
+    });
+
     app.whenReady().then(async () => {
         try {
             bootstrapPreReleaseSettingsFromMetadata();
