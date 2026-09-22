@@ -57,6 +57,7 @@ function makeDependencies(
     createSceneWithCapture: vi.fn(async () => scene),
     getSceneLaunchProfile: vi.fn(async () => null),
     upsertSceneLaunchProfile: vi.fn(async () => undefined),
+    reserveProvisioning: vi.fn(async () => undefined),
     rememberProvisionedScene: vi.fn(async () => undefined),
     ...overrides,
   };
@@ -75,10 +76,35 @@ describe("game provisioning core", () => {
       updatedProfile: true,
     });
     expect(dependencies.resolveCaptureTarget).toHaveBeenCalledWith(request);
+    expect(dependencies.reserveProvisioning).toHaveBeenCalledWith(
+      request,
+      target
+    );
     expect(dependencies.createSceneWithCapture).toHaveBeenCalledWith(request, target);
+    expect(dependencies.rememberProvisionedScene).toHaveBeenCalledWith(
+      request,
+      scene
+    );
     expect(dependencies.upsertSceneLaunchProfile).toHaveBeenCalledWith(
       autoOcrProfile()
     );
+
+    const reserveOrder = vi.mocked(
+      dependencies.reserveProvisioning
+    ).mock.invocationCallOrder[0];
+    const createOrder = vi.mocked(
+      dependencies.createSceneWithCapture
+    ).mock.invocationCallOrder[0];
+    const rememberOrder = vi.mocked(
+      dependencies.rememberProvisionedScene
+    ).mock.invocationCallOrder[0];
+    const profileOrder = vi.mocked(
+      dependencies.upsertSceneLaunchProfile
+    ).mock.invocationCallOrder[0];
+
+    expect(reserveOrder).toBeLessThan(createOrder);
+    expect(createOrder).toBeLessThan(rememberOrder);
+    expect(rememberOrder).toBeLessThan(profileOrder);
   });
 
   it("short-circuits an already-correct provisioned game before target resolution", async () => {
