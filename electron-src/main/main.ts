@@ -102,7 +102,9 @@ import {
     shutdownWindowSceneSwitcher,
 } from './services/window_scene_switcher.js';
 import {
+    createGameProvisioningSingleInstanceData,
     dispatchGameProvisioningCommand,
+    getGameProvisioningSecondInstanceArgs,
     hasEnsureGameCommand,
 } from './services/game_provisioning_command.js';
 import { ensureGameProvisionedWithRetry } from './services/game_provisioning_retry.js';
@@ -2665,10 +2667,15 @@ if (process.platform === 'darwin') {
     app.dock?.setIcon(getIconPath());
 }
 
-if (!app.requestSingleInstanceLock()) {
-    const forwardedArgs = process.argv.slice(1);
+const startupArgs = process.argv.slice(1);
+const singleInstanceData = createGameProvisioningSingleInstanceData(startupArgs);
+const gotSingleInstanceLock = singleInstanceData
+    ? app.requestSingleInstanceLock(singleInstanceData)
+    : app.requestSingleInstanceLock();
+
+if (!gotSingleInstanceLock) {
     app.whenReady().then(() => {
-        if (!hasEnsureGameCommand(forwardedArgs)) {
+        if (!hasEnsureGameCommand(startupArgs)) {
             dialog.showMessageBoxSync({
                 type: 'warning',
                 title: 'GSM Running',
@@ -2679,14 +2686,20 @@ if (!app.requestSingleInstanceLock()) {
         app.quit();
     });
 } else {
-    app.on('second-instance', (_event, commandLine) => {
-        const forwardedArgs = commandLine.slice(1);
+    app.on('second-instance', (_event, commandLine, _workingDirectory, additionalData) => {
+        const forwardedArgs = getGameProvisioningSecondInstanceArgs(
+            commandLine,
+            additionalData
+        );
         if (!hasEnsureGameCommand(forwardedArgs)) {
             mainWindow?.show();
             mainWindow?.focus();
             return;
         }
 
+        console.log(
+            '[GameProvisioning] Received second-instance provisioning request.'
+        );
         void app.whenReady()
             .then(async () => {
                 await processCommandLineArgs(forwardedArgs);
