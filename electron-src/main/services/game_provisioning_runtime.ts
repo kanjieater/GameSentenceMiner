@@ -220,13 +220,12 @@ async function prepareExistingProvisionedScene(
           return null;
         }
 
+        const pendingScene = scene;
         if (!binding.captureTitle?.trim()) {
           throw new Error(
-            `Pending provisioning binding for "${externalId}" has no capture fingerprint; refusing to claim same-name scene "${existingScene.name}".`
+            `Pending provisioning binding for "${externalId}" has no capture fingerprint; refusing to claim same-name scene "${pendingScene.name}".`
           );
         }
-
-        const pendingScene = scene;
         const actualCaptureTitle = await withProvisioningOBSReadiness(
           "OBS pending capture inspection",
           () => getWindowTitleFromSourceForProvisioning(pendingScene.id)
@@ -237,7 +236,7 @@ async function prepareExistingProvisionedScene(
             normalizeFingerprintTitle(binding.captureTitle)
         ) {
           throw new Error(
-            `Pending provisioning binding for "${externalId}" does not match the capture in same-name scene "${existingScene.name}"; refusing to claim it.`
+            `Pending provisioning binding for "${externalId}" does not match the capture in same-name scene "${pendingScene.name}"; refusing to claim it.`
           );
         }
 
@@ -254,7 +253,7 @@ async function prepareExistingProvisionedScene(
           ).toLocaleLowerCase();
           if (!actualExecutable || actualExecutable !== expectedExecutable) {
             throw new Error(
-              `Pending provisioning binding for "${externalId}" does not match the executable in same-name scene "${existingScene.name}"; refusing to claim it.`
+              `Pending provisioning binding for "${externalId}" does not match the executable in same-name scene "${pendingScene.name}"; refusing to claim it.`
             );
           }
         }
