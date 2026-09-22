@@ -105,10 +105,39 @@ jobs:
       - name: Install Electron dependencies
         run: npm ci --prefer-offline --no-audit --fund=false
 
-      - name: Build Windows installer and unpacked app
-        run: npm run app:dist -- --win
+      - name: Build native package
+        run: npm run build:native
+
+      - name: Compile Electron app
+        run: npm run build
+
+      - name: Build Windows helpers
+        run: npm run build:windows-helpers
+
+      - name: Stage overlay for Electron
+        run: npm run stage:overlay
+
+      - name: Package Windows installer and unpacked app
+        shell: pwsh
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $ErrorActionPreference = "Continue"
+          & npx electron-builder --publish=never --win *>&1 | Tee-Object -FilePath electron-builder.log
+          $exitCode = $LASTEXITCODE
+          if ($exitCode -ne 0) {
+            Write-Error "electron-builder failed with exit code $exitCode"
+            exit $exitCode
+          }
+
+      - name: Upload packaging diagnostics on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gsm-windows-diagnostics-${{ env.BUILD_SHA }}
+          path: electron-builder.log
+          if-no-files-found: ignore
+          retention-days: 7
 
       - name: Verify packaged overlay
         run: npm run verify:overlay-package
