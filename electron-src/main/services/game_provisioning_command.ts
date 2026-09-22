@@ -8,6 +8,42 @@ export type ParsedGameProvisioningCommand =
   | { kind: "invalid"; reason: string }
   | { kind: "ensure-game"; request: GameProvisioningRequest };
 
+export interface GameProvisioningSingleInstanceData {
+  gameProvisioningArgs?: string[];
+}
+
+export function createGameProvisioningSingleInstanceData(
+  args: string[]
+): GameProvisioningSingleInstanceData | undefined {
+  if (!hasEnsureGameCommand(args)) {
+    return undefined;
+  }
+  return { gameProvisioningArgs: [...args] };
+}
+
+export function getGameProvisioningSecondInstanceArgs(
+  commandLine: string[],
+  additionalData: unknown
+): string[] {
+  if (
+    additionalData &&
+    typeof additionalData === "object" &&
+    Array.isArray(
+      (additionalData as GameProvisioningSingleInstanceData)
+        .gameProvisioningArgs
+    )
+  ) {
+    const args = (
+      additionalData as GameProvisioningSingleInstanceData
+    ).gameProvisioningArgs;
+    if (args && args.every((value) => typeof value === "string")) {
+      return [...args];
+    }
+  }
+
+  return [...commandLine];
+}
+
 function collectFlagValues(args: string[], flag: string): string[] {
   const values: string[] = [];
   for (let index = 0; index < args.length; index += 1) {
