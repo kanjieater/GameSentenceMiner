@@ -29,8 +29,8 @@ const mocks = vi.hoisted(() => ({
   getOBSScenesForSceneSwitcher: vi.fn(),
   createSceneWithCapture: vi.fn(),
   getCurrentOBSSceneCollectionName: vi.fn(),
-  getWindowTitleFromSource: vi.fn(),
-  suggestWindowSceneSwitcherRule: vi.fn(),
+  getWindowTitleFromSourceForProvisioning: vi.fn(),
+  suggestWindowSceneSwitcherRuleForProvisioning: vi.fn(),
   upsertGeneratedWindowSceneRule: vi.fn(),
   upsertSceneLaunchProfile: vi.fn(),
   getGameProvisioningBinding: vi.fn(),
@@ -45,8 +45,10 @@ vi.mock("../ui/obs.js", () => ({
   createSceneWithCapture: mocks.createSceneWithCapture,
   getOBSScenesForSceneSwitcher: mocks.getOBSScenesForSceneSwitcher,
   getCurrentOBSSceneCollectionName: mocks.getCurrentOBSSceneCollectionName,
-  getWindowTitleFromSource: mocks.getWindowTitleFromSource,
-  suggestWindowSceneSwitcherRule: mocks.suggestWindowSceneSwitcherRule,
+  getWindowTitleFromSourceForProvisioning:
+    mocks.getWindowTitleFromSourceForProvisioningForProvisioning,
+  suggestWindowSceneSwitcherRuleForProvisioning:
+    mocks.suggestWindowSceneSwitcherRuleForProvisioningForProvisioning,
   isOBSProvisioningNotReadyError: mocks.isOBSProvisioningNotReadyError,
 }));
 
@@ -99,10 +101,10 @@ describe("GSM game provisioning runtime binding", () => {
         error instanceof Error &&
         error.message.toLowerCase().includes("not connected")
     );
-    mocks.getWindowTitleFromSource.mockImplementation(
+    mocks.getWindowTitleFromSourceForProvisioning.mockImplementation(
       async () => "Arc the Lad II - RetroArch"
     );
-    mocks.suggestWindowSceneSwitcherRule.mockImplementation(async () => ({
+    mocks.suggestWindowSceneSwitcherRuleForProvisioning.mockImplementation(async () => ({
       titlePattern: ".*Arc the Lad II.*",
       executableName: "retroarch.exe",
     }));
@@ -676,7 +678,7 @@ describe("GSM game provisioning runtime binding", () => {
     );
 
     scenes = [scene];
-    mocks.getWindowTitleFromSource.mockImplementationOnce(
+    mocks.getWindowTitleFromSourceForProvisioning.mockImplementationOnce(
       async () => "Unrelated Manual Window"
     );
 
@@ -715,10 +717,10 @@ describe("GSM game provisioning runtime binding", () => {
         executableName: "retroarch.exe",
       },
     ];
-    mocks.getWindowTitleFromSource.mockResolvedValue(
+    mocks.getWindowTitleFromSourceForProvisioning.mockResolvedValue(
       "Arc the Lad II - RetroArch"
     );
-    mocks.suggestWindowSceneSwitcherRule.mockResolvedValueOnce({
+    mocks.suggestWindowSceneSwitcherRuleForProvisioning.mockResolvedValueOnce({
       titlePattern: ".*Arc the Lad II.*",
       executableName: "unrelated.exe",
     });
@@ -791,6 +793,104 @@ describe("GSM game provisioning runtime binding", () => {
     );
     expect(resolver).not.toHaveBeenCalled();
     expect(mocks.createSceneWithCapture).not.toHaveBeenCalled();
+  });
+
+  it("reports target-not-ready when existing-scene capture inspection disconnects", async () => {
+    scenes = [scene];
+    profile = {
+      sceneId: scene.id,
+      sceneName: scene.name,
+      textHookMode: "none",
+      ocrMode: "auto",
+      launchOverlay: false,
+      agentScriptPath: "",
+      launchDelaySeconds: 0,
+    };
+    switcherConfig = readySwitcherConfig([
+      {
+        sceneUuid: scene.id,
+        sceneName: scene.name,
+        titlePattern: ".*Arc the Lad II.*",
+        executableName: "retroarch.exe",
+        enabled: true,
+        source: "gsm-generated",
+      },
+    ]);
+    mocks.getWindowTitleFromSourceForProvisioning.mockRejectedValueOnce(
+      new Error("OBS websocket not connected")
+    );
+    const resolver = vi.fn(async () => ({
+      status: "not-ready" as const,
+      reason: "should not run",
+    }));
+    const { ensureGameProvisionedWithGsm } = await loadRuntime();
+
+    const result = await ensureGameProvisionedWithGsm(request, resolver);
+
+    expect(result).toEqual({
+      status: "target-not-ready",
+      reason:
+        "OBS capture inspection is not ready yet: OBS websocket not connected",
+    });
+    expect(resolver).not.toHaveBeenCalled();
+  });
+
+  it("reports target-not-ready when pending fingerprint executable inspection disconnects", async () => {
+    scenes = [scene];
+    bindings = [
+      {
+        externalId: externalRequest.externalId,
+        collectionName: "Default",
+        sceneId: "",
+        sceneName: scene.name,
+        pending: true,
+        captureTitle: "Arc the Lad II - RetroArch",
+        executableName: "retroarch.exe",
+      },
+    ];
+    mocks.getWindowTitleFromSourceForProvisioning.mockResolvedValue(
+      "Arc the Lad II - RetroArch"
+    );
+    mocks.suggestWindowSceneSwitcherRuleForProvisioning.mockRejectedValueOnce(
+      new Error("OBS websocket not connected")
+    );
+    const resolver = vi.fn(async () => ({
+      status: "not-ready" as const,
+      reason: "should not run",
+    }));
+    const { ensureGameProvisionedWithGsm } = await loadRuntime();
+
+    const result = await ensureGameProvisionedWithGsm(
+      externalRequest,
+      resolver
+    );
+
+    expect(result).toEqual({
+      status: "target-not-ready",
+      reason:
+        "OBS pending executable inspection is not ready yet: OBS websocket not connected",
+    });
+    expect(resolver).not.toHaveBeenCalled();
+    expect(mocks.upsertGameProvisioningBinding).not.toHaveBeenCalled();
+  });
+
+  it("still fails closed when a connected existing scene has no compatible capture", async () => {
+    scenes = [scene];
+    mocks.getWindowTitleFromSourceForProvisioning.mockResolvedValueOnce(null);
+    const resolver = vi.fn(async () => ({
+      status: "not-ready" as const,
+      reason: "should not run",
+    }));
+    const { ensureGameProvisionedWithGsm } = await loadRuntime();
+
+    const result = await ensureGameProvisionedWithGsm(request, resolver);
+
+    expect(result).toEqual({
+      status: "failed",
+      reason:
+        'A scene named "Arc the Lad II" already exists but has no reusable window capture; refusing to rebuild it automatically.',
+    });
+    expect(resolver).not.toHaveBeenCalled();
   });
 
   it("fails closed when the active collection has a stale migration version", async () => {
