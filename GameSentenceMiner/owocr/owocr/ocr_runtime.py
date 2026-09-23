@@ -3058,6 +3058,10 @@ class OBSScreenshotThread(threading.Thread):
             return obs._normalize_ocr_preprocess_mode(preprocess_mode=scene_mode)
         return get_ocr_obs_capture_preprocess_mode()
 
+    def sync_ocr_config_to_capture_size(self, capture_width, capture_height):
+        if (capture_width, capture_height) != (self.width, self.height):
+            self.ocr_config.scale_to_custom_size(capture_width, capture_height)
+
     def connect_obs(self):
         import GameSentenceMiner.obs as obs
 
@@ -3201,8 +3205,7 @@ class OBSScreenshotThread(threading.Thread):
                     continue
 
                 capture_width, capture_height = img.size
-                if (capture_width, capture_height) != (self.width, self.height):
-                    self.ocr_config.scale_to_custom_size(capture_width, capture_height)
+                self.sync_ocr_config_to_capture_size(capture_width, capture_height)
                 img, crop_offset = apply_ocr_config_to_image(img, self.ocr_config, return_full_size=False)
                 primary_rectangles = []
                 if self.ocr_config and getattr(self.ocr_config, "rectangles", None):
