@@ -536,7 +536,8 @@ export function getLaunchSceneAssociation(
 }
 
 export function registerLaunchSceneAssociation(
-    association: LaunchSceneAssociation
+    association: LaunchSceneAssociation,
+    provenPids: Iterable<number> = []
 ): void {
     const normalized: LaunchSceneAssociation = {
         collectionName: association.collectionName.trim(),
@@ -555,32 +556,44 @@ export function registerLaunchSceneAssociation(
         throw new Error('A collection, external id, positive root PID, and scene are required for launch-scoped switching.');
     }
 
+    const seededPids = new Set<number>([normalized.pid]);
+    for (const rawPid of provenPids) {
+        const pid = Math.trunc(rawPid);
+        if (pid > 0) {
+            seededPids.add(pid);
+        }
+    }
+
     for (const tracker of launchSceneTrackers.values()) {
+        const overlaps = [...seededPids].some((pid) => tracker.tree.owns(pid));
         if (
-            tracker.association.collectionName === normalized.collectionName &&
-            tracker.tree.owns(normalized.pid) &&
+            overlaps &&
             (tracker.association.externalId !== normalized.externalId ||
                 tracker.association.sceneUuid !== normalized.sceneUuid)
         ) {
             throw new Error(
-                `PID ${normalized.pid} is already associated with scene "${tracker.association.sceneName}" in collection "${normalized.collectionName}"; refusing to silently reassign it.`
+                `A proven launch PID is already associated with scene "${tracker.association.sceneName}" in collection "${normalized.collectionName}"; refusing to silently reassign it.`
             );
         }
     }
+
+    const tree = new LaunchProcessTree(normalized.pid);
+    tree.seedProvenPids(seededPids);
 
     const now = Date.now();
     launchSceneTrackers.set(
         launchSceneTrackerKey(normalized.collectionName, normalized.externalId),
         {
             association: normalized,
-            tree: new LaunchProcessTree(normalized.pid),
+            tree,
             registeredAt: now,
             lastLiveAt: now,
         }
     );
 
     if (
-        latestForeground?.pid === normalized.pid &&
+        latestForeground &&
+        tree.owns(latestForeground.pid) &&
         activeCollectionName === normalized.collectionName
     ) {
         manualHoldContextKey = '';
