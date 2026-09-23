@@ -435,6 +435,7 @@ interface LaunchSceneTracker {
 
 const launchSceneTrackers = new Map<string, LaunchSceneTracker>();
 const LAUNCH_ASSOCIATION_EXIT_GRACE_MS = 5_000;
+const LAUNCH_LINEAGE_OBSERVATION_MS = 10_000;
 
 function launchSceneTrackerKey(collectionName: string, externalId: string): string {
     return collectionName + "\u0000" + externalId;
@@ -613,11 +614,26 @@ function removeLaunchSceneAssociationsForScene(sceneUuid: string): void {
 
 async function refreshLaunchSceneOwnershipForForeground(pid: number): Promise<void> {
     if (
-        getLaunchSceneAssociation(pid) ||
         launchSceneTrackers.size === 0 ||
         !dependencies?.getProcessRelationships
     ) {
         return;
+    }
+
+    const existingAssociation = getLaunchSceneAssociation(pid);
+    if (existingAssociation) {
+        const now = Date.now();
+        const shouldKeepObserving = [...launchSceneTrackers.values()].some(
+            (tracker) =>
+                tracker.association.collectionName ===
+                    existingAssociation.collectionName &&
+                tracker.association.externalId ===
+                    existingAssociation.externalId &&
+                now - tracker.registeredAt <= LAUNCH_LINEAGE_OBSERVATION_MS
+        );
+        if (!shouldKeepObserving) {
+            return;
+        }
     }
 
     const relationships = await dependencies.getProcessRelationships();
