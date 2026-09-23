@@ -36,12 +36,16 @@ describe("game provisioning primary transport", () => {
       version: 1,
       pid: 99,
       executablePath: "C:\\gsm\\electron.exe",
+      workingDirectory: "C:\\repo",
       argumentPrefix: ["C:\\repo", "--flag"],
     });
 
     expect(serialized).toContain("version=1\n");
     expect(serialized).toContain("pid=99\n");
     expect(serialized).toContain("argc=2\n");
+    expect(serialized).toContain(
+      "workdir=" + Buffer.from("C:\\repo").toString("base64")
+    );
     expect(serialized).toContain(
       "executable=" + Buffer.from("C:\\gsm\\electron.exe").toString("base64")
     );
