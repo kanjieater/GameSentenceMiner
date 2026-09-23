@@ -267,6 +267,35 @@ describe('AutoLauncher OCR scene activity fallback', () => {
         });
     });
 
+    it('passes a provisioned basic OCR preset to auto-started OCR', async () => {
+        const { AutoLauncher } = await loadAutoLauncherModule();
+        const launcher = new AutoLauncher() as any;
+        const scene = { id: 'scene-provisioned', name: 'Himawari -Pebble in the Sky-' };
+
+        getSceneLaunchProfileForSceneMock.mockReturnValue({
+            sceneId: scene.id,
+            sceneName: scene.name,
+            textHookMode: 'none',
+            ocrMode: 'auto',
+            ocrPreset: 'basic-default',
+            launchOverlay: false,
+            agentScriptPath: '',
+            launchDelaySeconds: 0,
+        });
+        getExecutableNameFromSourceMock.mockResolvedValue(null);
+        sceneHasVisibleOutputMock.mockResolvedValue(true);
+
+        await launcher.runOcrAutomation(scene);
+
+        expect(startOCRMock).toHaveBeenCalledWith({
+            scene,
+            promptForAreaSelection: false,
+            source: 'auto-launcher',
+            ocrPreset: 'basic-default',
+        });
+        expect(launcher.activeOcrPreset).toBe('basic-default');
+    });
+
     it('stops auto-launched OCR only after OBS output is black or empty for 180 seconds', async () => {
         const { AutoLauncher } = await loadAutoLauncherModule();
         const launcher = new AutoLauncher() as any;
