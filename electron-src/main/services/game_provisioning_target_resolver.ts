@@ -25,6 +25,11 @@ export interface GameProvisioningTargetResolverOptions {
     executableName?: string;
     windowTitle?: string;
   }>;
+  processSnapshot?: Array<{
+    pid: number;
+    executableName?: string;
+    windowTitle?: string;
+  }>;
 }
 
 function normalizeTitle(value: string | undefined): string {
@@ -65,6 +70,9 @@ function resolveUniqueLaunchOwnedOption(
   options: ObsWindowOption[],
   launchProcesses:
     | Array<{ pid: number; executableName?: string; windowTitle?: string }>
+    | undefined,
+  processSnapshot:
+    | Array<{ pid: number; executableName?: string; windowTitle?: string }>
     | undefined
 ): CaptureTargetResolution | null {
   if (!launchProcesses || launchProcesses.length === 0) {
@@ -81,6 +89,20 @@ function resolveUniqueLaunchOwnedOption(
     ).toLocaleLowerCase();
     const windowTitle = normalizeTitle(process.windowTitle);
     if (!executable || !windowTitle) {
+      continue;
+    }
+
+    const sameWindowOwners = (processSnapshot ?? []).filter(
+      (candidate) =>
+        normalizeTitle(candidate.windowTitle) === windowTitle &&
+        normalizeExecutableName(candidate.executableName).toLocaleLowerCase() === executable
+    );
+    if (
+      sameWindowOwners.some((candidate) => candidate.pid !== process.pid)
+    ) {
+      // OBS window options do not expose a PID. If another live process has
+      // the exact same executable/title tuple, title+exe cannot prove which
+      // process owns the OBS option, so fail closed.
       continue;
     }
 
@@ -130,7 +152,8 @@ export function resolveForegroundCaptureTarget(
   if (!foreground) {
     const launchOwned = resolveUniqueLaunchOwnedOption(
       options,
-      resolverOptions.launchProcesses
+      resolverOptions.launchProcesses,
+      resolverOptions.processSnapshot
     );
     if (launchOwned) {
       return launchOwned;
@@ -151,7 +174,8 @@ export function resolveForegroundCaptureTarget(
   if (pidMismatch && resolverOptions.enforceProcessId !== false) {
     const launchOwnedTarget = resolveUniqueLaunchOwnedOption(
       options,
-      resolverOptions.launchProcesses
+      resolverOptions.launchProcesses,
+      resolverOptions.processSnapshot
     );
     if (launchOwnedTarget) {
       return launchOwnedTarget;
