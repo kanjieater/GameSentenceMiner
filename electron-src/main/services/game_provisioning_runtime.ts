@@ -309,13 +309,20 @@ async function prepareExistingProvisionedScene(
         `The saved scene-switcher rule for "${existingScene.name}" is disabled; refusing to bypass a user-disabled rule with launch-scoped switching.`
       );
     }
-    registerLaunchSceneAssociation({
-      collectionName,
-      externalId: binding.externalId,
-      pid: request.processId,
-      sceneUuid: existingScene.id,
-      sceneName: existingScene.name,
-    });
+    registerLaunchSceneAssociation(
+      {
+        collectionName,
+        externalId: binding.externalId,
+        pid: request.processId,
+        sceneUuid: existingScene.id,
+        sceneName: existingScene.name,
+      },
+      new Set(
+        (request.launchProcessIds ?? [])
+          .filter((pid) => Number.isInteger(pid) && pid > 0)
+          .map((pid) => Math.trunc(pid))
+      )
+    );
     return { scene: existingScene, changed: false };
   }
 
