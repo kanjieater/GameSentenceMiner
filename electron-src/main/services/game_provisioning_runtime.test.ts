@@ -448,6 +448,100 @@ describe("GSM game provisioning runtime binding", () => {
     expect(mocks.createSceneWithCapture).not.toHaveBeenCalled();
   });
 
+  it("provisions a launch-scoped exact-PID target without persisting a durable rule", async () => {
+    const resolver = vi.fn(async () => ({
+      status: "resolved" as const,
+      target: {
+        title: "RetroArch SwanStation 1.0.0 4d309c0",
+        durableSwitcherSafe: false,
+        selection: {
+          title: "RetroArch SwanStation 1.0.0 4d309c0",
+          targetKind: "window" as const,
+          captureValues: {
+            window_capture:
+              "RetroArch SwanStation 1.0.0 4d309c0:RetroArch:retroarch.exe",
+            game_capture:
+              "RetroArch SwanStation 1.0.0 4d309c0:RetroArch:retroarch.exe",
+          },
+        },
+      },
+    }));
+    const { ensureGameProvisionedWithGsm } = await loadRuntime();
+
+    const result = await ensureGameProvisionedWithGsm(
+      externalRequest,
+      resolver
+    );
+
+    expect(result.status).toBe("provisioned");
+    expect(mocks.createSceneWithCapture).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sceneName: "Arc the Lad II",
+      }),
+      { persistWindowSceneRule: false }
+    );
+    expect(bindings).toEqual([
+      expect.objectContaining({
+        externalId: externalRequest.externalId,
+        collectionName: "Default",
+        sceneId: scene.id,
+        pending: false,
+        switchingMode: "launch-pid",
+      }),
+    ]);
+    expect(mocks.registerLaunchSceneAssociation).toHaveBeenCalledWith({
+      collectionName: "Default",
+      externalId: externalRequest.externalId,
+      pid: externalRequest.processId,
+      sceneUuid: scene.id,
+      sceneName: scene.name,
+    });
+    expect(mocks.upsertGeneratedWindowSceneRule).not.toHaveBeenCalled();
+  });
+
+  it("refreshes launch-scoped PID switching on a later bound launch without repairing a generic rule", async () => {
+    scenes = [scene];
+    bindings = [{
+      externalId: externalRequest.externalId,
+      collectionName: "Default",
+      sceneId: scene.id,
+      sceneName: scene.name,
+      pending: false,
+      switchingMode: "launch-pid",
+    }];
+    profile = {
+      sceneId: scene.id,
+      sceneName: scene.name,
+      textHookMode: "none",
+      ocrMode: "auto",
+      launchOverlay: false,
+      agentScriptPath: "",
+      launchDelaySeconds: 0,
+    };
+    switcherConfig = readySwitcherConfig([]);
+    const resolver = vi.fn(async () => ({
+      status: "not-ready" as const,
+      reason: "should not run",
+    }));
+    const { ensureGameProvisionedWithGsm } = await loadRuntime();
+
+    const result = await ensureGameProvisionedWithGsm(
+      { ...externalRequest, processId: 54321 },
+      resolver
+    );
+
+    expect(result.status).toBe("already-configured");
+    expect(resolver).not.toHaveBeenCalled();
+    expect(mocks.upsertGeneratedWindowSceneRule).not.toHaveBeenCalled();
+    expect(mocks.registerLaunchSceneAssociation).toHaveBeenCalledWith({
+      collectionName: "Default",
+      externalId: externalRequest.externalId,
+      pid: 54321,
+      sceneUuid: scene.id,
+      sceneName: scene.name,
+    });
+  });
+
   it("keeps the same external id independently bound across OBS collections", async () => {
     const sceneA = { id: "scene-a", name: "Arc the Lad II" };
     const sceneB = { id: "scene-b", name: "Arc the Lad II" };
