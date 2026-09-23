@@ -33,9 +33,10 @@ export interface ProvisioningCaptureTarget {
   title: string;
   selection: ObsSceneCaptureWindowSelection;
   /**
-   * False when the current launch is identified safely by exact PID/window/executable
-   * evidence, but the discovered title/executable is too generic to persist as a
-   * durable scene-switcher rule (for example, a shared emulator window title).
+   * False when this target should use launch-scoped process ownership instead
+   * of persisting a title/executable scene-switcher rule. Playnite-owned
+   * launches intentionally use this path even when the visible title happens
+   * to match the display name.
    */
   durableSwitcherSafe?: boolean;
   /** Actual foreground PID proven to belong to this Playnite launch. */
