@@ -185,7 +185,9 @@ describe("game provisioning whole-operation retry", () => {
 
     expect(result.status).toBe("already-configured");
     expect(ensureAttempt).toHaveBeenCalledTimes(2);
-    expect(getForegroundSnapshot).toHaveBeenCalledTimes(2);
+    // Retry samples foreground once for launch-tree observation and once in
+    // the production resolver on each attempt.
+    expect(getForegroundSnapshot).toHaveBeenCalledTimes(4);
     expect(getWindowOptions).toHaveBeenCalledTimes(2);
   });
 
