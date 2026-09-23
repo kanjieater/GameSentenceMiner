@@ -212,7 +212,7 @@ def test_get_overlay_minimum_character_size_falls_back_to_legacy_overlay_file(tm
 
 def test_ocr_config_round_trip_preserves_scene_preprocess_override():
     config = OCRConfig(
-        scene="Arc the Lad II",
+        scene="CRT Test Scene",
         rectangles=[],
         obs_capture_preprocess="crt_scanlines",
     )
