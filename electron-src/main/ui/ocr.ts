@@ -21,6 +21,8 @@ import {
     setKeepNewline,
     setAdvancedMode,
 } from '../store.js';
+import type { SceneOcrPreset } from '../store.js';
+import { getDefaultStabilityOcr } from '../../shared/ocr_defaults.js';
 import { getSanitizedPythonEnv, getWindowsNamedPythonExecutable } from '../util.js';
 import {
     closeAllPythonProcesses,
@@ -54,7 +56,12 @@ import {
 // the message bus carries events (ocr.event) and commands (ocr.command). See
 // runtime/process_supervisor.ts and util/communication/ocr_ipc.py.
 const OCR_CLIENT_ID = 'ocr';
-let pendingOcrLaunch: { command: string; args: string[]; windowsHide: boolean } | null = null;
+let pendingOcrLaunch: {
+    command: string;
+    args: string[];
+    windowsHide: boolean;
+    env?: NodeJS.ProcessEnv;
+} | null = null;
 let ocrSupervisorWired = false;
 let ocrStopRequested = false;
 export type OCRStartSource = 'user' | 'auto-launcher';
@@ -64,6 +71,7 @@ type OCRConfigChanges = Record<string, [unknown, unknown]>;
 interface OCRStartOptions {
     source?: OCRStartSource;
     restartReason?: string;
+    ocrPreset?: SceneOcrPreset;
 }
 interface OCRStopOptions {
     reason: string;
@@ -389,6 +397,7 @@ function ensureOcrSupervisorWired(): void {
         windowsHide: () => pendingOcrLaunch?.windowsHide ?? false,
         namedExecutableLabel: 'OCR',
         priority: () => normalizeOcrProcessPriority(getOCRConfig().processPriority),
+        env: () => pendingOcrLaunch?.env ?? {},
         gracefulStop: {
             topic: 'ocr.command',
             data: buildOcrStopCommand('process-manager-default-stop'),
@@ -546,6 +555,10 @@ function runOCR(
         command: executable,
         args,
         windowsHide: shouldHideOcrConsole({ source: startSource, mode: runMode }),
+        env:
+            options?.ocrPreset === 'basic-default'
+                ? { GSM_OCR_PROFILE_PRESET: 'basic-default' }
+                : {},
     };
     ocrStopRequested = false;
     setActiveOcrSession(startSource, runMode);
@@ -620,7 +633,17 @@ export async function startOCR(
         const promptForAreaSelection = options?.promptForAreaSelection ?? true;
         const ocr_config = getOCRConfig();
         const config = await getActiveOCRConfig(options?.scene);
-        const twoPassOCR = ocr_config.advancedMode ? ocr_config.twoPassOCR : true;
+        const useBasicDefaultPreset = options?.ocrPreset === 'basic-default';
+        const twoPassOCR = useBasicDefaultPreset
+            ? true
+            : ocr_config.advancedMode
+                ? ocr_config.twoPassOCR
+                : true;
+        const ocr1 = useBasicDefaultPreset
+            ? getDefaultStabilityOcr(process.platform)
+            : (twoPassOCR ? `${ocr_config.ocr1}` : `${ocr_config.ocr2}`);
+        const ocr2 = useBasicDefaultPreset ? 'glens' : `${ocr_config.ocr2}`;
+        const language = useBasicDefaultPreset ? 'ja' : `${ocr_config.language}`;
         if (!config && promptForAreaSelection) {
             const response = await dialog.showMessageBox(mainWindow!, {
                 type: 'question',
@@ -637,17 +660,16 @@ export async function startOCR(
                 // Do nothing, just run OCR on the entire window
             }
         }
-        const ocr1 = twoPassOCR ? `${ocr_config.ocr1}` : `${ocr_config.ocr2}`;
         const command = [
             `${getPythonPath()}`,
             `-m`,
             `GameSentenceMiner.ocr.gsm_ocr`,
             `--language`,
-            `${ocr_config.language}`,
+            `${language}`,
             `--ocr1`,
             `${ocr1}`,
             `--ocr2`,
-            `${ocr_config.ocr2}`,
+            `${ocr2}`,
             `--twopassocr`,
             `${twoPassOCR ? 1 : 0}`,
             `--obs_ocr`,
@@ -661,7 +683,9 @@ export async function startOCR(
                 `${ocr_config.furigana_filter_sensitivity}`
             );
         appendHotkeyArgs(command, ocr_config);
-        if (ocr_config.optimize_second_scan || !ocr_config.advancedMode) command.push('--optimize_second_scan');
+        if (useBasicDefaultPreset || ocr_config.optimize_second_scan || !ocr_config.advancedMode) {
+            command.push('--optimize_second_scan');
+        }
         if (shouldEnableLegacyKeepNewlineFlag(ocr_config)) command.push('--keep_newline');
 
         runOCR(command, {
