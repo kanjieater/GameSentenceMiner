@@ -10,6 +10,11 @@ export class GameProvisioningNotReadyError extends Error {
 export interface GameProvisioningRequest {
   displayName: string;
   processId?: number;
+  /**
+   * Ephemeral launch-tree PIDs already proven by the local retry layer.
+   * Never transported from Playnite; used only to seed runtime ownership.
+   */
+  launchProcessIds?: number[];
   externalId?: string;
   defaultMode?: "ocr";
 }
