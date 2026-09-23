@@ -75,7 +75,12 @@ function resolveUniqueLaunchOwnedOption(
     | Array<{ pid: number; executableName?: string; windowTitle?: string }>
     | undefined
 ): CaptureTargetResolution | null {
-  if (!launchProcesses || launchProcesses.length === 0) {
+  if (
+    !launchProcesses ||
+    launchProcesses.length === 0 ||
+    !processSnapshot ||
+    processSnapshot.length === 0
+  ) {
     return null;
   }
 
