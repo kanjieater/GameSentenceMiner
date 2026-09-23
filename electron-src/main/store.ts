@@ -125,12 +125,15 @@ export enum HookableGameType {
 
 export type SceneTextHookMode = "none" | "agent" | "textractor" | "luna";
 export type SceneOcrMode = "none" | "auto" | "manual";
+export type SceneOcrPreset = "basic-default";
 
 export interface SceneLaunchProfile {
     sceneId?: string;
     sceneName: string;
     textHookMode: SceneTextHookMode;
     ocrMode: SceneOcrMode;
+    /** Optional per-profile runtime OCR preset. Undefined preserves legacy/global behavior. */
+    ocrPreset?: SceneOcrPreset;
     launchOverlay: boolean;
     agentScriptPath: string;
     launchDelaySeconds: number;
@@ -160,6 +163,8 @@ interface FrontPageState {
     ocrConfigs?: OCRGame[];
 }
 
+export type GameProvisioningSwitchingMode = "durable-rule" | "launch-pid";
+
 export interface GameProvisioningBinding {
     externalId: string;
     collectionName: string;
@@ -168,6 +173,7 @@ export interface GameProvisioningBinding {
     pending: boolean;
     captureTitle?: string;
     executableName?: string;
+    switchingMode?: GameProvisioningSwitchingMode;
 }
 
 interface StoreConfig {
@@ -380,6 +386,10 @@ function isSceneOcrMode(value: unknown): value is SceneOcrMode {
     return value === "none" || value === "auto" || value === "manual";
 }
 
+function isSceneOcrPreset(value: unknown): value is SceneOcrPreset {
+    return value === "basic-default";
+}
+
 function normalizeSceneLaunchProfile(value: unknown): SceneLaunchProfile | null {
     if (!value || typeof value !== "object") {
         return null;
@@ -404,6 +414,9 @@ function normalizeSceneLaunchProfile(value: unknown): SceneLaunchProfile | null 
         ocrMode: isSceneOcrMode(profile.ocrMode)
             ? profile.ocrMode
             : DEFAULT_SCENE_OCR_MODE,
+        ocrPreset: isSceneOcrPreset(profile.ocrPreset)
+            ? profile.ocrPreset
+            : undefined,
         launchOverlay:
             typeof profile.launchOverlay === "boolean"
                 ? profile.launchOverlay
@@ -467,7 +480,7 @@ function mergeSceneLaunchProfile(
     patch: Partial<
         Pick<
             SceneLaunchProfile,
-            "textHookMode" | "ocrMode" | "launchOverlay" | "agentScriptPath" | "launchDelaySeconds" | "gameExecutablePath"
+            "textHookMode" | "ocrMode" | "ocrPreset" | "launchOverlay" | "agentScriptPath" | "launchDelaySeconds" | "gameExecutablePath"
         >
     >
 ): void {
@@ -491,6 +504,7 @@ function mergeSceneLaunchProfile(
                   sceneName,
                   textHookMode: DEFAULT_SCENE_TEXT_HOOK_MODE,
                   ocrMode: DEFAULT_SCENE_OCR_MODE,
+                  ocrPreset: undefined,
                   launchOverlay: DEFAULT_SCENE_LAUNCH_OVERLAY,
                   agentScriptPath: "",
                 launchDelaySeconds: DEFAULT_SCENE_LAUNCH_DELAY_SECONDS,
@@ -502,6 +516,7 @@ function mergeSceneLaunchProfile(
         sceneName,
         textHookMode: patch.textHookMode ?? existing.textHookMode,
         ocrMode: patch.ocrMode ?? existing.ocrMode,
+        ocrPreset: patch.ocrPreset ?? existing.ocrPreset,
         launchOverlay:
             typeof patch.launchOverlay === "boolean"
                 ? patch.launchOverlay
@@ -973,7 +988,8 @@ export function reserveGameProvisioningBinding(
     collectionName: string,
     sceneName: string,
     captureTitle: string,
-    executableName?: string
+    executableName?: string,
+    switchingMode: GameProvisioningSwitchingMode = "durable-rule"
 ): void {
     const normalizedExternalId = (externalId ?? "").trim();
     const normalizedCollectionName =
@@ -1008,6 +1024,7 @@ export function reserveGameProvisioningBinding(
         pending: true,
         captureTitle: normalizedCaptureTitle,
         executableName: normalizedExecutableName || undefined,
+        switchingMode,
     });
     store.set("gameProvisioningBindings", bindings);
 }
@@ -1015,7 +1032,8 @@ export function reserveGameProvisioningBinding(
 export function upsertGameProvisioningBinding(
     externalId: string,
     collectionName: string,
-    scene: ObsScene
+    scene: ObsScene,
+    switchingMode?: GameProvisioningSwitchingMode
 ): void {
     const normalizedExternalId = (externalId ?? "").trim();
     const normalizedCollectionName =
@@ -1027,18 +1045,21 @@ export function upsertGameProvisioningBinding(
     }
 
     const bindings = store.get("gameProvisioningBindings", []);
+    const index = bindings.findIndex(
+        (binding) =>
+            binding.externalId === normalizedExternalId &&
+            binding.collectionName === normalizedCollectionName
+    );
+    const existing = index >= 0 ? bindings[index] : undefined;
     const next: GameProvisioningBinding = {
         externalId: normalizedExternalId,
         collectionName: normalizedCollectionName,
         sceneId,
         sceneName,
         pending: false,
+        switchingMode:
+            switchingMode ?? existing?.switchingMode ?? "durable-rule",
     };
-    const index = bindings.findIndex(
-        (binding) =>
-            binding.externalId === normalizedExternalId &&
-            binding.collectionName === normalizedCollectionName
-    );
     if (index >= 0) {
         bindings[index] = next;
     } else {
@@ -1102,6 +1123,7 @@ export function upsertSceneLaunchProfile(profile: SceneLaunchProfile): void {
         {
             textHookMode: normalized.textHookMode,
             ocrMode: normalized.ocrMode,
+            ocrPreset: normalized.ocrPreset,
             launchOverlay: normalized.launchOverlay,
             agentScriptPath: normalized.agentScriptPath,
             launchDelaySeconds: normalized.launchDelaySeconds,

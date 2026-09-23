@@ -23,7 +23,10 @@ import {
   normalizeExecutableName,
   type WindowSceneSwitcherCollection,
 } from "../../shared/window_scene_switcher.js";
-import { upsertGeneratedWindowSceneRule } from "./window_scene_switcher.js";
+import {
+  registerLaunchSceneAssociation,
+  upsertGeneratedWindowSceneRule,
+} from "./window_scene_switcher.js";
 import {
   ensureGameProvisioned,
   GameProvisioningNotReadyError,
@@ -201,10 +204,12 @@ async function prepareExistingProvisionedScene(
   const collectionName = collection.collectionName;
   const scenes = await getProvisioningOBSScenes();
   const externalId = request.externalId?.trim();
+  const binding = externalId
+    ? getGameProvisioningBinding(externalId, collectionName)
+    : null;
   let scene: ProvisioningScene | undefined;
 
   if (externalId) {
-    const binding = getGameProvisioningBinding(externalId, collectionName);
     if (binding) {
       if (binding.sceneId) {
         scene = scenes.find((candidate) => candidate.id === binding.sceneId);
@@ -292,6 +297,35 @@ async function prepareExistingProvisionedScene(
   const existingRule = collection.rules.find(
     (candidate) => candidate.sceneUuid === existingScene.id
   );
+
+  if (binding?.switchingMode === "launch-pid") {
+    if (!request.processId || request.processId <= 0) {
+      throw new GameProvisioningNotReadyError(
+        `Provisioned game "${existingScene.name}" requires a current launch PID for scene switching.`
+      );
+    }
+    if (existingRule && !existingRule.enabled) {
+      throw new Error(
+        `The saved scene-switcher rule for "${existingScene.name}" is disabled; refusing to bypass a user-disabled rule with launch-scoped switching.`
+      );
+    }
+    registerLaunchSceneAssociation(
+      {
+        collectionName,
+        externalId: binding.externalId,
+        pid: request.processId,
+        sceneUuid: existingScene.id,
+        sceneName: existingScene.name,
+      },
+      new Set(
+        (request.launchProcessIds ?? [])
+          .filter((pid) => Number.isInteger(pid) && pid > 0)
+          .map((pid) => Math.trunc(pid))
+      )
+    );
+    return { scene: existingScene, changed: false };
+  }
+
   if (existingRule) {
     if (!existingRule.enabled) {
       throw new Error(
@@ -348,7 +382,10 @@ async function createProvisionedScene(
 
   await withProvisioningOBSReadiness(
     "OBS scene creation",
-    () => createSceneWithCapture(selection)
+    () =>
+      createSceneWithCapture(selection, {
+        persistWindowSceneRule: target.durableSwitcherSafe !== false,
+      })
   );
 
   const scenes = await getProvisioningOBSScenes();
@@ -425,18 +462,63 @@ export function createGsmGameProvisioningDependencies(
         collection.collectionName,
         request.displayName,
         fingerprint.captureTitle,
-        fingerprint.executableName
+        fingerprint.executableName,
+        target.durableSwitcherSafe === false ? "launch-pid" : "durable-rule"
       );
     },
-    rememberProvisionedScene: async (request, scene) => {
+    rememberProvisionedScene: async (request, scene, target) => {
       const externalId = request.externalId?.trim();
       if (externalId) {
         const collection = await getReadyActiveCollection();
-        upsertGameProvisioningBinding(
+        const existing = getGameProvisioningBinding(
           externalId,
-          collection.collectionName,
-          scene
+          collection.collectionName
         );
+        const switchingMode =
+          target?.durableSwitcherSafe === false
+            ? "launch-pid"
+            : existing?.switchingMode ?? "durable-rule";
+
+        if (switchingMode === "launch-pid") {
+          upsertGameProvisioningBinding(
+            externalId,
+            collection.collectionName,
+            scene,
+            switchingMode
+          );
+        } else {
+          upsertGameProvisioningBinding(
+            externalId,
+            collection.collectionName,
+            scene
+          );
+        }
+
+        if (switchingMode === "launch-pid") {
+          if (!request.processId || request.processId <= 0) {
+            throw new GameProvisioningNotReadyError(
+              `Provisioned game "${scene.name}" requires a current launch PID for scene switching.`
+            );
+          }
+          const provenPids = new Set<number>(
+            (request.launchProcessIds ?? [])
+              .filter((pid) => Number.isInteger(pid) && pid > 0)
+              .map((pid) => Math.trunc(pid))
+          );
+          if (target?.launchProcessId && target.launchProcessId > 0) {
+            provenPids.add(Math.trunc(target.launchProcessId));
+          }
+          registerLaunchSceneAssociation(
+            {
+              collectionName: collection.collectionName,
+              externalId,
+              pid: request.processId,
+              sceneUuid: scene.id,
+              sceneName: scene.name,
+            },
+            provenPids
+          );
+        }
       }
     },
   };

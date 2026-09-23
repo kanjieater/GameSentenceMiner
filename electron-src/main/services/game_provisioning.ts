@@ -10,6 +10,11 @@ export class GameProvisioningNotReadyError extends Error {
 export interface GameProvisioningRequest {
   displayName: string;
   processId?: number;
+  /**
+   * Ephemeral launch-tree PIDs already proven by the local retry layer.
+   * Never transported from Playnite; used only to seed runtime ownership.
+   */
+  launchProcessIds?: number[];
   externalId?: string;
   defaultMode?: "ocr";
 }
@@ -24,6 +29,7 @@ export interface ProvisioningSceneProfile {
   sceneName: string;
   textHookMode: "none" | "agent" | "textractor" | "luna";
   ocrMode: "none" | "auto" | "manual";
+  ocrPreset?: "basic-default";
   launchOverlay: boolean;
   agentScriptPath: string;
   launchDelaySeconds: number;
@@ -32,6 +38,15 @@ export interface ProvisioningSceneProfile {
 export interface ProvisioningCaptureTarget {
   title: string;
   selection: ObsSceneCaptureWindowSelection;
+  /**
+   * False when this target should use launch-scoped process ownership instead
+   * of persisting a title/executable scene-switcher rule. Playnite-owned
+   * launches intentionally use this path even when the visible title happens
+   * to match the display name.
+   */
+  durableSwitcherSafe?: boolean;
+  /** Actual foreground PID proven to belong to this Playnite launch. */
+  launchProcessId?: number;
 }
 
 export interface ExistingProvisioningState {
@@ -112,7 +127,8 @@ export interface GameProvisioningDependencies {
    */
   rememberProvisionedScene(
     request: GameProvisioningRequest,
-    scene: ProvisioningScene
+    scene: ProvisioningScene,
+    target?: ProvisioningCaptureTarget
   ): Promise<void> | void;
 }
 
@@ -124,6 +140,7 @@ function buildGenericAutoOcrProfile(
     sceneName: scene.name,
     textHookMode: "none",
     ocrMode: "auto",
+    ocrPreset: "basic-default",
     launchOverlay: false,
     agentScriptPath: "",
     launchDelaySeconds: 0,
@@ -250,7 +267,8 @@ export async function ensureGameProvisioned(
     // remain recoverable on the next call.
     await dependencies.rememberProvisionedScene(
       normalizedRequest,
-      createdScene
+      createdScene,
+      resolution.target
     );
 
     const existingProfile =

@@ -41,6 +41,7 @@ function autoOcrProfile(
     sceneName: scene.name,
     textHookMode: "none",
     ocrMode: "auto",
+    ocrPreset: "basic-default",
     launchOverlay: false,
     agentScriptPath: "",
     launchDelaySeconds: 0,
@@ -83,7 +84,8 @@ describe("game provisioning core", () => {
     expect(dependencies.createSceneWithCapture).toHaveBeenCalledWith(request, target);
     expect(dependencies.rememberProvisionedScene).toHaveBeenCalledWith(
       request,
-      scene
+      scene,
+      target
     );
     expect(dependencies.upsertSceneLaunchProfile).toHaveBeenCalledWith(
       autoOcrProfile()
@@ -208,6 +210,7 @@ describe("game provisioning core", () => {
 
   it("preserves an existing user-owned Game Automation profile unchanged", async () => {
     const existingProfile = autoOcrProfile({
+      ocrPreset: undefined,
       textHookMode: "textractor",
       ocrMode: "none",
       launchOverlay: true,

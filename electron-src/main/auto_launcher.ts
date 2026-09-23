@@ -26,7 +26,7 @@ import {
     runtimeState,
     upsertSceneLaunchProfile
 } from './store.js';
-import type { SceneLaunchProfile, SceneOcrMode, SceneTextHookMode } from './store.js';
+import type { SceneLaunchProfile, SceneOcrMode, SceneOcrPreset, SceneTextHookMode } from './store.js';
 import { exec, ChildProcess, spawn } from 'child_process';
 import * as path from 'path';
 import * as fs from 'fs';
@@ -65,6 +65,7 @@ export class AutoLauncher {
     private hasWarnedAboutMissingLuna: boolean = false;
     private activeOcrMode: SceneOcrMode = "none";
     private activeOcrSceneId: string = "";
+    private activeOcrPreset: SceneOcrPreset | undefined;
     private expectedAutoLauncherOcrStop: boolean = false;
     private lastObservedAutoLauncherOcrRunning: boolean = false;
     private suppressedAutoOcrSceneId: string = "";
@@ -306,9 +307,14 @@ export class AutoLauncher {
 
         this.activeOcrMode = "none";
         this.activeOcrSceneId = "";
+        this.activeOcrPreset = undefined;
     }
 
-    private async applyOcrMode(mode: SceneOcrMode, scene: ObsScene) {
+    private async applyOcrMode(
+        mode: SceneOcrMode,
+        scene: ObsScene,
+        ocrPreset?: SceneOcrPreset
+    ) {
         const runtime = getOCRRuntimeState();
         const isAutoLauncherOwned =
             runtime.isRunning && runtime.source === "auto-launcher";
@@ -318,6 +324,7 @@ export class AutoLauncher {
         if (runtime.isRunning && runtime.source !== "auto-launcher") {
             this.activeOcrMode = "none";
             this.activeOcrSceneId = "";
+            this.activeOcrPreset = undefined;
             return;
         }
 
@@ -330,6 +337,7 @@ export class AutoLauncher {
             }
             this.activeOcrMode = "none";
             this.activeOcrSceneId = "";
+            this.activeOcrPreset = undefined;
             return;
         }
 
@@ -337,11 +345,14 @@ export class AutoLauncher {
             isAutoLauncherOwned && this.activeOcrSceneId !== scene.id;
         const shouldRestartForModeMismatch =
             isAutoLauncherOwned && runtime.mode !== desiredRunMode;
+        const shouldRestartForPresetChange =
+            isAutoLauncherOwned && this.activeOcrPreset !== ocrPreset;
         if (
             isAutoLauncherOwned &&
             this.activeOcrMode === mode &&
             !shouldRestartForSceneChange &&
-            !shouldRestartForModeMismatch
+            !shouldRestartForModeMismatch &&
+            !shouldRestartForPresetChange
         ) {
             return;
         }
@@ -356,6 +367,7 @@ export class AutoLauncher {
                     scene,
                     promptForAreaSelection: false,
                     source: "auto-launcher",
+                    ...(ocrPreset ? { ocrPreset } : {}),
                 });
             } else {
                 startManualOCR({ source: "auto-launcher" });
@@ -370,6 +382,7 @@ export class AutoLauncher {
 
         this.activeOcrMode = mode;
         this.activeOcrSceneId = scene.id;
+        this.activeOcrPreset = mode === "auto" ? ocrPreset : undefined;
     }
 
     private async resolveSceneExecutableName(scene: ObsScene): Promise<string | null> {
@@ -451,7 +464,7 @@ export class AutoLauncher {
 
     private resolveDesiredOcrMode(
         currentScene: ObsScene
-    ): { mode: SceneOcrMode; forcedManual: boolean } {
+    ): { mode: SceneOcrMode; forcedManual: boolean; ocrPreset?: SceneOcrPreset } {
         const sceneProfile = getSceneLaunchProfileForScene(currentScene);
         let ocrMode: SceneOcrMode = sceneProfile?.ocrMode ?? "none";
 
@@ -473,7 +486,11 @@ export class AutoLauncher {
             ocrMode = "manual";
         }
 
-        return { mode: ocrMode, forcedManual };
+        return {
+            mode: ocrMode,
+            forcedManual,
+            ocrPreset: sceneProfile?.ocrPreset,
+        };
     }
 
     private async runOcrAutomation(currentScene: ObsScene) {
@@ -500,8 +517,11 @@ export class AutoLauncher {
             this.lastObservedAutoLauncherOcrRunning = wasAutoLauncherRunning;
 
             const ignoreActiveScene = getIgnoreActiveSceneForOcr();
-            const { mode: ocrMode, forcedManual: forcedManualOcr } =
-                this.resolveDesiredOcrMode(currentScene);
+            const {
+                mode: ocrMode,
+                forcedManual: forcedManualOcr,
+                ocrPreset,
+            } = this.resolveDesiredOcrMode(currentScene);
 
             // "Ignore active OBS scene for OCR": once OCR is running under
             // auto-launcher control, leave it running across scene changes when
@@ -528,7 +548,7 @@ export class AutoLauncher {
                 if (this.isAutoOcrSuppressedForScene(currentScene.id)) {
                     this.clearOcrSuppression("scene-not-configured");
                 }
-                await this.applyOcrMode("none", currentScene);
+                await this.applyOcrMode("none", currentScene, ocrPreset);
                 return;
             }
 
@@ -551,7 +571,7 @@ export class AutoLauncher {
                 return;
             }
 
-            await this.applyOcrMode(ocrMode, currentScene);
+            await this.applyOcrMode(ocrMode, currentScene, ocrPreset);
         } catch (error) {
             this.errorInternal('[AutoLauncher:OCR] poll error:', error);
         }

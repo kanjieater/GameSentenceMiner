@@ -51,6 +51,7 @@ vi.mock('electron', () => ({
 
 vi.mock('child_process', () => ({
     exec: execMock,
+    execFile: vi.fn(),
     spawn: spawnMock,
 }));
 
@@ -753,6 +754,113 @@ describe('renameOBSScene', () => {
 
         await expect(getSceneCaptureMode('scene-123')).resolves.toBe(
             'window_capture'
+        );
+    });
+
+    it('refreshes an existing window capture source in place', async () => {
+        const { refreshSceneCaptureSource } = await loadObsModule();
+
+        obsCallMock.mockImplementation(async (requestType: string) => {
+            if (requestType === 'GetVersion') {
+                return {};
+            }
+            if (requestType === 'GetSceneItemList') {
+                return {
+                    sceneItems: [
+                        {
+                            sourceName: 'My Scene - Window Capture',
+                            inputKind: 'window_capture',
+                            sceneItemEnabled: true,
+                            sceneItemId: 11,
+                        },
+                    ],
+                };
+            }
+            if (requestType === 'GetInputSettings') {
+                return {
+                    inputSettings: {
+                        mode: 'window',
+                        window: 'PCSX2:QtWindow:pcsx2-qt.exe',
+                    },
+                };
+            }
+            if (requestType === 'SetInputSettings') {
+                return {};
+            }
+            return {};
+        });
+
+        await expect(refreshSceneCaptureSource('scene-123')).resolves.toBe(true);
+        expect(obsCallMock).toHaveBeenCalledWith('SetInputSettings', {
+            inputName: 'My Scene - Window Capture',
+            inputSettings: {
+                mode: 'window',
+                window: 'PCSX2:QtWindow:pcsx2-qt.exe',
+            },
+            overlay: false,
+        });
+    });
+
+    it('refreshes the window capture even when a game capture is also present', async () => {
+        const { refreshSceneCaptureSource } = await loadObsModule();
+
+        obsCallMock.mockImplementation(async (requestType: string, payload?: any) => {
+            if (requestType === 'GetVersion') {
+                return {};
+            }
+            if (requestType === 'GetSceneItemList') {
+                return {
+                    sceneItems: [
+                        {
+                            sourceName: 'My Scene - Game Capture',
+                            inputKind: 'game_capture',
+                            sceneItemEnabled: true,
+                            sceneItemId: 10,
+                        },
+                        {
+                            sourceName: 'My Scene - Window Capture',
+                            inputKind: 'window_capture',
+                            sceneItemEnabled: true,
+                            sceneItemId: 11,
+                        },
+                    ],
+                };
+            }
+            if (requestType === 'GetInputSettings') {
+                if (payload?.inputName === 'My Scene - Window Capture') {
+                    return {
+                        inputSettings: {
+                            mode: 'window',
+                            window: 'PCSX2:QtWindow:pcsx2-qt.exe',
+                        },
+                    };
+                }
+                return {
+                    inputSettings: {
+                        mode: 'any',
+                    },
+                };
+            }
+            if (requestType === 'SetInputSettings') {
+                return {};
+            }
+            return {};
+        });
+
+        await expect(refreshSceneCaptureSource('scene-123')).resolves.toBe(true);
+        expect(obsCallMock).toHaveBeenCalledWith('SetInputSettings', {
+            inputName: 'My Scene - Window Capture',
+            inputSettings: {
+                mode: 'window',
+                window: 'PCSX2:QtWindow:pcsx2-qt.exe',
+            },
+            overlay: false,
+        });
+        expect(obsCallMock).not.toHaveBeenCalledWith(
+            'SetInputSettings',
+            expect.objectContaining({
+                inputName: 'My Scene - Game Capture',
+            })
         );
     });
 

@@ -3,6 +3,10 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import log from 'electron-log/main.js';
+import {
+    LaunchProcessTree,
+    type ProcessRelationship,
+} from './process_lineage.js';
 
 import {
     findWindowSceneSwitcherCandidates,
@@ -57,11 +61,13 @@ export interface WindowSceneSwitcherRuntimeDependencies {
     getScenes: () => Promise<ObsSceneRef[] | null>;
     getCurrentScene: () => Promise<ObsSceneRef>;
     switchScene: (sceneUuid: string) => Promise<void>;
+    refreshCaptureSource?: (sceneUuid: string) => Promise<boolean>;
     suggestRule: (
         sceneUuid: string
     ) => Promise<{ titlePattern: string; executableName?: string } | null>;
     requestForegroundSnapshot: () => void;
     restoreForegroundWindow: (hwnd: string) => void;
+    getProcessRelationships?: () => Promise<ProcessRelationship[]>;
 }
 
 export interface WindowSceneSwitcherMigrationResult {
@@ -411,6 +417,30 @@ export function upsertGeneratedWindowSceneRule(
     return saved;
 }
 
+export interface LaunchSceneAssociation {
+    collectionName: string;
+    externalId: string;
+    /** Playnite-reported root PID for this launch. */
+    pid: number;
+    sceneUuid: string;
+    sceneName: string;
+}
+
+interface LaunchSceneTracker {
+    association: LaunchSceneAssociation;
+    tree: LaunchProcessTree;
+    registeredAt: number;
+    lastLiveAt: number;
+}
+
+const launchSceneTrackers = new Map<string, LaunchSceneTracker>();
+const LAUNCH_ASSOCIATION_EXIT_GRACE_MS = 5_000;
+const LAUNCH_LINEAGE_OBSERVATION_MS = 10_000;
+
+function launchSceneTrackerKey(collectionName: string, externalId: string): string {
+    return collectionName + "\u0000" + externalId;
+}
+
 let dependencies: WindowSceneSwitcherRuntimeDependencies | null = null;
 let activeCollectionName = '';
 let hookStatus: WindowSceneSwitcherHookStatus = isWindows() ? 'starting' : 'unsupported';
@@ -435,6 +465,180 @@ let foregroundReconcileTimer: ReturnType<typeof setInterval> | null = null;
 let foregroundReconcileInFlight = false;
 let latestDecisionKey = '';
 const diagnosticLastLoggedAt = new Map<string, number>();
+
+function isProcessAlive(pid: number): boolean {
+    try {
+        process.kill(pid, 0);
+        return true;
+    } catch (error: any) {
+        return error?.code === 'EPERM';
+    }
+}
+
+export function observeLaunchSceneProcessRelationships(
+    relationships: Iterable<ProcessRelationship>
+): void {
+    const snapshot = [...relationships];
+    for (const tracker of launchSceneTrackers.values()) {
+        tracker.tree.observe(snapshot);
+    }
+
+    const pidOwners = new Map<string, LaunchSceneTracker>();
+    for (const tracker of launchSceneTrackers.values()) {
+        for (const pid of tracker.tree.getKnownPids()) {
+            const ownerKey = tracker.association.collectionName + "\u0000" + pid;
+            const existing = pidOwners.get(ownerKey);
+            if (
+                existing &&
+                existing.association.externalId !== tracker.association.externalId
+            ) {
+                throw new Error(
+                    `PID ${pid} is claimed by multiple launch-scoped scenes in collection "${tracker.association.collectionName}"; refusing ambiguous process ownership.`
+                );
+            }
+            pidOwners.set(ownerKey, tracker);
+        }
+    }
+}
+
+export function pruneLaunchSceneAssociations(
+    processAlive: (pid: number) => boolean = isProcessAlive,
+    now = Date.now(),
+    exitGraceMs = LAUNCH_ASSOCIATION_EXIT_GRACE_MS
+): number {
+    let removed = 0;
+    for (const [key, tracker] of launchSceneTrackers) {
+        const anyAlive = tracker.tree.getKnownPids().some(processAlive);
+        if (anyAlive) {
+            tracker.lastLiveAt = now;
+            continue;
+        }
+        if (now - Math.max(tracker.registeredAt, tracker.lastLiveAt) < exitGraceMs) {
+            continue;
+        }
+        launchSceneTrackers.delete(key);
+        removed += 1;
+    }
+    return removed;
+}
+
+export function getLaunchSceneAssociation(
+    pid: number,
+    collectionName = activeCollectionName
+): LaunchSceneAssociation | null {
+    const matches = [...launchSceneTrackers.values()].filter(
+        (tracker) =>
+            tracker.association.collectionName === collectionName &&
+            tracker.tree.owns(pid)
+    );
+    if (matches.length !== 1) {
+        return null;
+    }
+    return { ...matches[0].association };
+}
+
+export function registerLaunchSceneAssociation(
+    association: LaunchSceneAssociation,
+    provenPids: Iterable<number> = []
+): void {
+    const normalized: LaunchSceneAssociation = {
+        collectionName: association.collectionName.trim(),
+        externalId: association.externalId.trim(),
+        pid: Math.trunc(association.pid),
+        sceneUuid: association.sceneUuid.trim(),
+        sceneName: association.sceneName.trim(),
+    };
+    if (
+        !normalized.collectionName ||
+        !normalized.externalId ||
+        normalized.pid <= 0 ||
+        !normalized.sceneUuid ||
+        !normalized.sceneName
+    ) {
+        throw new Error('A collection, external id, positive root PID, and scene are required for launch-scoped switching.');
+    }
+
+    const seededPids = new Set<number>([normalized.pid]);
+    for (const rawPid of provenPids) {
+        const pid = Math.trunc(rawPid);
+        if (pid > 0) {
+            seededPids.add(pid);
+        }
+    }
+
+    for (const tracker of launchSceneTrackers.values()) {
+        const overlaps = [...seededPids].some((pid) => tracker.tree.owns(pid));
+        if (
+            tracker.association.collectionName === normalized.collectionName &&
+            overlaps &&
+            (tracker.association.externalId !== normalized.externalId ||
+                tracker.association.sceneUuid !== normalized.sceneUuid)
+        ) {
+            throw new Error(
+                `A proven launch PID is already associated with scene "${tracker.association.sceneName}" in collection "${normalized.collectionName}"; refusing to silently reassign it.`
+            );
+        }
+    }
+
+    const tree = new LaunchProcessTree(normalized.pid);
+    tree.seedProvenPids(seededPids);
+
+    const now = Date.now();
+    launchSceneTrackers.set(
+        launchSceneTrackerKey(normalized.collectionName, normalized.externalId),
+        {
+            association: normalized,
+            tree,
+            registeredAt: now,
+            lastLiveAt: now,
+        }
+    );
+
+    if (
+        latestForeground &&
+        tree.owns(latestForeground.pid) &&
+        activeCollectionName === normalized.collectionName
+    ) {
+        manualHoldContextKey = '';
+        scheduleEvaluation();
+    }
+}
+
+function removeLaunchSceneAssociationsForScene(sceneUuid: string): void {
+    for (const [key, tracker] of launchSceneTrackers) {
+        if (tracker.association.sceneUuid === sceneUuid) {
+            launchSceneTrackers.delete(key);
+        }
+    }
+}
+
+async function refreshLaunchSceneOwnershipForForeground(pid: number): Promise<void> {
+    if (
+        launchSceneTrackers.size === 0 ||
+        !dependencies?.getProcessRelationships
+    ) {
+        return;
+    }
+
+    const existingAssociation = getLaunchSceneAssociation(pid);
+    if (existingAssociation) {
+        const now = Date.now();
+        const shouldKeepObserving = [...launchSceneTrackers.values()].some(
+            (tracker) =>
+                tracker.association.collectionName ===
+                    existingAssociation.collectionName &&
+                tracker.association.externalId ===
+                    existingAssociation.externalId &&
+                now - tracker.registeredAt <= LAUNCH_LINEAGE_OBSERVATION_MS
+        );
+        if (!shouldKeepObserving) {
+            return;
+        }
+    }
+
+    const relationships = await dependencies.getProcessRelationships();
+    observeLaunchSceneProcessRelationships(relationships);
+}
 
 function describeForeground(snapshot: ForegroundWindowSnapshot): string {
     const executable = normalizeExecutableName(
@@ -564,7 +768,12 @@ async function showConflictPicker(conflict: WindowSceneSwitcherConflict): Promis
     }
 }
 
-async function performSceneSwitch(sceneUuid: string, generation: number): Promise<void> {
+async function performSceneSwitch(
+    sceneUuid: string,
+    generation: number,
+    targetNameOverride?: string,
+    refreshLaunchCapture = false
+): Promise<void> {
     if (!dependencies || generation !== latestGeneration || !obsConnected) {
         return;
     }
@@ -573,9 +782,20 @@ async function performSceneSwitch(sceneUuid: string, generation: number): Promis
         return;
     }
     const targetName =
+        targetNameOverride ??
         getActiveCollection()?.rules.find((rule) => rule.sceneUuid === sceneUuid)?.sceneName ??
         sceneUuid;
     if (current.id === sceneUuid) {
+        if (refreshLaunchCapture && dependencies.refreshCaptureSource) {
+            const refreshed = await dependencies.refreshCaptureSource(sceneUuid);
+            if (!refreshed) {
+                logDiagnostic(
+                    `capture-refresh-failed:${sceneUuid}:${generation}`,
+                    `OBS is already on "${targetName}", but its launch-scoped capture source could not be refreshed in place.`,
+                    'warn'
+                );
+            }
+        }
         logDiagnostic(
             `current:${sceneUuid}:${generation}`,
             `OBS is already on the matched scene "${targetName}" for ${describeForeground(latestForeground!)}.`
@@ -596,6 +816,16 @@ async function performSceneSwitch(sceneUuid: string, generation: number): Promis
         return;
     }
     if (verified.id === sceneUuid) {
+        if (refreshLaunchCapture && dependencies.refreshCaptureSource) {
+            const refreshed = await dependencies.refreshCaptureSource(sceneUuid);
+            if (!refreshed) {
+                logDiagnostic(
+                    `capture-refresh-failed:${sceneUuid}:${generation}`,
+                    `OBS switched to "${targetName}", but its capture source could not be refreshed in place.`,
+                    'warn'
+                );
+            }
+        }
         logDiagnostic(
             `verified:${sceneUuid}:${generation}`,
             `Verified OBS switched to "${targetName}".`
@@ -659,6 +889,37 @@ async function evaluateForeground(generation: number): Promise<void> {
         );
         return;
     }
+    try {
+        await refreshLaunchSceneOwnershipForForeground(latestForeground.pid);
+    } catch (error) {
+        logDiagnostic(
+            `launch-ownership-conflict:${latestForeground.pid}`,
+            `Could not establish unambiguous launch ownership for PID ${latestForeground.pid}: ${error instanceof Error ? error.message : String(error)}`,
+            'warn'
+        );
+        return;
+    }
+    const launchAssociation = getLaunchSceneAssociation(
+        latestForeground.pid,
+        collection.collectionName
+    );
+    if (launchAssociation) {
+        switchChain = switchChain
+            .then(() =>
+                performSceneSwitch(
+                    launchAssociation.sceneUuid,
+                    generation,
+                    launchAssociation.sceneName,
+                    true
+                )
+            )
+            .catch((error) =>
+                log.warn('[SceneSwitcher] Failed launch-scoped scene switch:', error)
+            );
+        await switchChain;
+        return;
+    }
+
     const candidates = findWindowSceneSwitcherCandidates(collection.rules, latestForeground);
     if (candidates.length === 0) {
         logDiagnostic(
@@ -720,6 +981,7 @@ async function runForegroundReconciliation(): Promise<void> {
     }
     foregroundReconcileInFlight = true;
     try {
+        pruneLaunchSceneAssociations();
         const runtimeOBSConnected = dependencies.isOBSConnected();
         if (!runtimeOBSConnected) {
             if (obsConnected || startupSceneSyncPending) {
@@ -1043,6 +1305,7 @@ export function renameWindowSceneSwitcherRule(sceneUuid: string, sceneName: stri
 }
 
 export function removeWindowSceneSwitcherRule(sceneUuid: string): void {
+    removeLaunchSceneAssociationsForScene(sceneUuid);
     const config = readConfig();
     let changed = false;
     for (const collection of config.collections) {
@@ -1066,6 +1329,14 @@ export async function reconcileWindowSceneSwitcherRules(scenes: ObsSceneRef[]): 
         return;
     }
     const scenesById = new Map(scenes.map((scene) => [scene.id, scene.name]));
+    for (const [key, tracker] of launchSceneTrackers) {
+        if (
+            tracker.association.collectionName === activeCollectionName &&
+            !scenesById.has(tracker.association.sceneUuid)
+        ) {
+            launchSceneTrackers.delete(key);
+        }
+    }
     collection.rules = collection.rules.flatMap((rule) => {
         const currentName = scenesById.get(rule.sceneUuid);
         return currentName ? [{ ...rule, sceneName: currentName }] : [];
@@ -1244,6 +1515,7 @@ export function shutdownWindowSceneSwitcher(): void {
     pendingConflict = null;
     closeConflictWindow();
     dependencies = null;
+    launchSceneTrackers.clear();
     latestDecisionKey = '';
     diagnosticLastLoggedAt.clear();
 }

@@ -19,6 +19,17 @@ export interface GameProvisioningTargetResolverDependencies {
 
 export interface GameProvisioningTargetResolverOptions {
   enforceProcessId?: boolean;
+  isLaunchProcess?: (pid: number) => boolean;
+  launchProcesses?: Array<{
+    pid: number;
+    executableName?: string;
+    windowTitle?: string;
+  }>;
+  processSnapshot?: Array<{
+    pid: number;
+    executableName?: string;
+    windowTitle?: string;
+  }>;
 }
 
 function normalizeTitle(value: string | undefined): string {
@@ -55,6 +66,88 @@ function optionBelongsToRequestedGame(
   return suggested === requested || title === requested;
 }
 
+function resolveUniqueLaunchOwnedOption(
+  options: ObsWindowOption[],
+  launchProcesses:
+    | Array<{ pid: number; executableName?: string; windowTitle?: string }>
+    | undefined,
+  processSnapshot:
+    | Array<{ pid: number; executableName?: string; windowTitle?: string }>
+    | undefined
+): CaptureTargetResolution | null {
+  if (
+    !launchProcesses ||
+    launchProcesses.length === 0 ||
+    !processSnapshot ||
+    processSnapshot.length === 0
+  ) {
+    return null;
+  }
+
+  // Off-foreground resolution must still prove which exact launch PID owns
+  // the window. Executable equality alone is insufficient for shared
+  // emulators because another pcsx2/retroarch instance may be open.
+  const matches: Array<{ option: ObsWindowOption; pid: number }> = [];
+  for (const process of launchProcesses) {
+    const executable = normalizeExecutableName(
+      process.executableName
+    ).toLocaleLowerCase();
+    const windowTitle = normalizeTitle(process.windowTitle);
+    if (!executable || !windowTitle) {
+      continue;
+    }
+
+    const sameWindowOwners = (processSnapshot ?? []).filter(
+      (candidate) =>
+        normalizeTitle(candidate.windowTitle) === windowTitle &&
+        normalizeExecutableName(candidate.executableName).toLocaleLowerCase() === executable
+    );
+    if (
+      sameWindowOwners.some((candidate) => candidate.pid !== process.pid)
+    ) {
+      // OBS window options do not expose a PID. If another live process has
+      // the exact same executable/title tuple, title+exe cannot prove which
+      // process owns the OBS option, so fail closed.
+      continue;
+    }
+
+    for (const option of options) {
+      if (option.targetKind !== "window") {
+        continue;
+      }
+      if (normalizeTitle(option.title) !== windowTitle) {
+        continue;
+      }
+      if (optionExecutable(option).toLocaleLowerCase() !== executable) {
+        continue;
+      }
+      matches.push({ option, pid: process.pid });
+    }
+  }
+
+  if (matches.length === 0) {
+    return null;
+  }
+  if (matches.length > 1) {
+    return {
+      status: "not-ready",
+      reason:
+        "Multiple OBS Setup Capture targets are PID-correlated to the Playnite launch; waiting for a unique launch-owned window.",
+    };
+  }
+
+  const [{ option: selection, pid: launchProcessId }] = matches;
+  return {
+    status: "resolved",
+    target: {
+      title: selection.title,
+      selection,
+      durableSwitcherSafe: false,
+      launchProcessId,
+    },
+  };
+}
+
 export function resolveForegroundCaptureTarget(
   request: GameProvisioningRequest,
   foreground: ForegroundWindowSnapshot | null,
@@ -62,6 +155,14 @@ export function resolveForegroundCaptureTarget(
   resolverOptions: GameProvisioningTargetResolverOptions = {}
 ): CaptureTargetResolution {
   if (!foreground) {
+    const launchOwned = resolveUniqueLaunchOwnedOption(
+      options,
+      resolverOptions.launchProcesses,
+      resolverOptions.processSnapshot
+    );
+    if (launchOwned) {
+      return launchOwned;
+    }
     return { status: "not-ready", reason: "GSM has not observed a foreground game window yet." };
   }
 
@@ -69,13 +170,26 @@ export function resolveForegroundCaptureTarget(
     typeof request.processId === "number" && request.processId > 0
       ? request.processId
       : undefined;
-  const pidMismatch = requestedPid !== undefined && foreground.pid !== requestedPid;
+  const launchOwned =
+    requestedPid !== undefined &&
+    (resolverOptions.isLaunchProcess
+      ? resolverOptions.isLaunchProcess(foreground.pid)
+      : foreground.pid === requestedPid);
+  const pidMismatch = requestedPid !== undefined && !launchOwned;
   if (pidMismatch && resolverOptions.enforceProcessId !== false) {
+    const launchOwnedTarget = resolveUniqueLaunchOwnedOption(
+      options,
+      resolverOptions.launchProcesses,
+      resolverOptions.processSnapshot
+    );
+    if (launchOwnedTarget) {
+      return launchOwnedTarget;
+    }
     return {
       status: "not-ready",
       reason:
         "Foreground PID " + foreground.pid +
-        " does not match requested PID " + requestedPid + ".",
+        " is not part of the Playnite launch rooted at PID " + requestedPid + ".",
     };
   }
 
@@ -119,25 +233,16 @@ export function resolveForegroundCaptureTarget(
 
   const selection = executableMatches[0];
 
-  // PID is useful evidence about which process Playnite started, but it is not
-  // sufficient evidence that the foreground window is the actual game. A
-  // launcher/wrapper can briefly own the reported PID before handing off to a
-  // child process, so every new binding must still identify the requested game.
-  if (!optionBelongsToRequestedGame(request, selection)) {
-    return {
-      status: "not-ready",
-      reason:
-        requestedPid === undefined
-          ? "No launcher PID was available, and the foreground capture target cannot be tied safely to the requested game name."
-          : pidMismatch
-            ? "The foreground process replaced the requested PID, but its capture target cannot be tied safely to the requested game name."
-            : "The foreground process matches the requested PID, but its capture target does not identify the requested game yet.",
-    };
-  }
+  const belongsToRequestedGame = optionBelongsToRequestedGame(
+    request,
+    selection
+  );
+  const selectedExecutable = optionExecutable(selection).toLocaleLowerCase();
 
-  const requiresExecutableProof = requestedPid === undefined || pidMismatch;
-  if (requiresExecutableProof) {
-    const selectedExecutable = optionExecutable(selection).toLocaleLowerCase();
+  // A foreground process proven to be the Playnite root or one of its
+  // descendants is authoritative launch identity. The human-readable window
+  // title is only used to locate the matching OBS capture target.
+  if (launchOwned) {
     if (
       !foregroundExecutable ||
       !selectedExecutable ||
@@ -146,11 +251,49 @@ export function resolveForegroundCaptureTarget(
       return {
         status: "not-ready",
         reason:
-          requestedPid === undefined
-            ? "No launcher PID was available, and GSM could not verify the foreground executable from the OBS capture target."
-            : "The foreground process replaced the requested PID, but GSM could not verify the replacement executable from the OBS capture target.",
+          "The foreground process belongs to the Playnite launch, but GSM could not verify the matching OBS capture target executable.",
       };
     }
+
+    return {
+      status: "resolved",
+      target: {
+        title: selection.title,
+        selection,
+        // Process ownership is the durable Playnite integration model. Do not
+        // turn a coincidentally matching window title into persistent game
+        // identity; a fresh launch PID/tree will be supplied on every launch.
+        durableSwitcherSafe: false,
+        launchProcessId: foreground.pid,
+      },
+    };
+  }
+
+  // If process ownership cannot be proven (no PID, broken ancestry, etc.),
+  // retain the conservative legacy fallback. Name/executable matching is a
+  // fallback only, never the primary game identity.
+  if (!belongsToRequestedGame) {
+    return {
+      status: "not-ready",
+      reason:
+        requestedPid === undefined
+          ? "No launcher PID was available, and the foreground capture target cannot be tied safely to the requested game name."
+          : "The foreground process is not part of the requested launch, and its capture target cannot be tied safely to the requested game name.",
+    };
+  }
+
+  if (
+    !foregroundExecutable ||
+    !selectedExecutable ||
+    selectedExecutable !== foregroundExecutable
+  ) {
+    return {
+      status: "not-ready",
+      reason:
+        requestedPid === undefined
+          ? "No launcher PID was available, and GSM could not verify the foreground executable from the OBS capture target."
+          : "GSM could not prove process lineage, and could not verify the fallback capture target executable.",
+    };
   }
 
   return {

@@ -87,6 +87,7 @@ import {
     getCurrentScene,
     getOBSScenesForSceneSwitcher,
     getOBSWindowOptionsForProvisioning,
+    refreshSceneCaptureSource,
     isOBSConnected,
     launchOBSFromElectron,
     setOBSScene,
@@ -107,7 +108,13 @@ import {
     getGameProvisioningSecondInstanceArgs,
     hasEnsureGameCommand,
 } from './services/game_provisioning_command.js';
+import {
+    buildGameProvisioningPrimaryTransport,
+    clearGameProvisioningPrimaryTransport,
+    writeGameProvisioningPrimaryTransport,
+} from './services/game_provisioning_primary_transport.js';
 import { ensureGameProvisionedWithRetry } from './services/game_provisioning_retry.js';
+import { getWindowsProcessRelationships } from './services/process_lineage.js';
 import type {
     ForegroundWindowSnapshot,
     WindowSceneSwitcherHookStatus,
@@ -1637,6 +1644,7 @@ async function createWindow() {
         },
         getCurrentScene,
         switchScene: setOBSSceneByUuid,
+        refreshCaptureSource: refreshSceneCaptureSource,
         suggestRule: suggestWindowSceneSwitcherRule,
         requestForegroundSnapshot: () => {
             sendBackendCommand('refresh_foreground_window');
@@ -1644,6 +1652,7 @@ async function createWindow() {
         restoreForegroundWindow: (hwnd) => {
             sendBackendCommand('restore_foreground_window', { hwnd });
         },
+        getProcessRelationships: getWindowsProcessRelationships,
     });
 
     registerMainIPC({
@@ -2564,6 +2573,7 @@ const gameProvisioningRetryDependencies = {
     isSupported: isWindows,
     getForegroundSnapshot: getLatestForegroundWindowSnapshot,
     getWindowOptions: getOBSWindowOptionsForProvisioning,
+    getProcessRelationships: getWindowsProcessRelationships,
 };
 
 async function processGameProvisioningArgs(args: string[]): Promise<void> {
@@ -2672,6 +2682,25 @@ const singleInstanceData = createGameProvisioningSingleInstanceData(startupArgs)
 const gotSingleInstanceLock = singleInstanceData
     ? app.requestSingleInstanceLock(singleInstanceData)
     : app.requestSingleInstanceLock();
+
+if (gotSingleInstanceLock) {
+    const primaryTransport = buildGameProvisioningPrimaryTransport(
+        process.pid,
+        process.execPath,
+        process.argv
+    );
+    writeGameProvisioningPrimaryTransport(BASE_DIR, primaryTransport);
+    app.once('will-quit', () => {
+        try {
+            clearGameProvisioningPrimaryTransport(BASE_DIR, process.pid);
+        } catch (error) {
+            console.warn(
+                '[GameProvisioning] Failed to clear primary transport descriptor:',
+                error
+            );
+        }
+    });
+}
 
 if (!gotSingleInstanceLock) {
     app.whenReady().then(() => {

@@ -31,6 +31,7 @@ const mocks = vi.hoisted(() => ({
   getCurrentOBSSceneCollectionName: vi.fn(),
   getWindowTitleFromSourceForProvisioning: vi.fn(),
   suggestWindowSceneSwitcherRuleForProvisioning: vi.fn(),
+  registerLaunchSceneAssociation: vi.fn(),
   upsertGeneratedWindowSceneRule: vi.fn(),
   upsertSceneLaunchProfile: vi.fn(),
   getGameProvisioningBinding: vi.fn(),
@@ -53,6 +54,7 @@ vi.mock("../ui/obs.js", () => ({
 }));
 
 vi.mock("./window_scene_switcher.js", () => ({
+  registerLaunchSceneAssociation: mocks.registerLaunchSceneAssociation,
   upsertGeneratedWindowSceneRule: mocks.upsertGeneratedWindowSceneRule,
 }));
 
@@ -129,7 +131,8 @@ describe("GSM game provisioning runtime binding", () => {
         requestedCollectionName: string,
         sceneName: string,
         captureTitle: string,
-        executableName?: string
+        executableName?: string,
+        switchingMode: "durable-rule" | "launch-pid" = "durable-rule"
       ) => {
         const existing = bindings.find(
           (binding) =>
@@ -145,6 +148,7 @@ describe("GSM game provisioning runtime binding", () => {
             pending: true,
             captureTitle,
             executableName,
+            switchingMode,
           });
         }
       }
@@ -153,14 +157,22 @@ describe("GSM game provisioning runtime binding", () => {
       (
         externalId: string,
         requestedCollectionName: string,
-        boundScene: { id: string; name: string }
+        boundScene: { id: string; name: string },
+        switchingMode?: "durable-rule" | "launch-pid"
       ) => {
+        const existing = bindings.find(
+          (binding) =>
+            binding.externalId === externalId &&
+            binding.collectionName === requestedCollectionName
+        );
         const next = {
           externalId,
           collectionName: requestedCollectionName,
           sceneId: boundScene.id,
           sceneName: boundScene.name,
           pending: false,
+          switchingMode:
+            switchingMode ?? existing?.switchingMode ?? "durable-rule",
         };
         const index = bindings.findIndex(
           (binding) =>
@@ -434,6 +446,145 @@ describe("GSM game provisioning runtime binding", () => {
     expect(result.status).toBe("already-configured");
     expect(resolver).not.toHaveBeenCalled();
     expect(mocks.createSceneWithCapture).not.toHaveBeenCalled();
+  });
+
+  it("provisions a launch-scoped exact-PID target without persisting a durable rule", async () => {
+    const resolver = vi.fn(async () => ({
+      status: "resolved" as const,
+      target: {
+        title: "RetroArch SwanStation 1.0.0 4d309c0",
+        durableSwitcherSafe: false,
+        selection: {
+          title: "RetroArch SwanStation 1.0.0 4d309c0",
+          targetKind: "window" as const,
+          captureValues: {
+            window_capture:
+              "RetroArch SwanStation 1.0.0 4d309c0:RetroArch:retroarch.exe",
+            game_capture:
+              "RetroArch SwanStation 1.0.0 4d309c0:RetroArch:retroarch.exe",
+          },
+        },
+      },
+    }));
+    const { ensureGameProvisionedWithGsm } = await loadRuntime();
+
+    const result = await ensureGameProvisionedWithGsm(
+      externalRequest,
+      resolver
+    );
+
+    expect(result.status).toBe("provisioned");
+    expect(mocks.createSceneWithCapture).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sceneName: "Arc the Lad II",
+      }),
+      { persistWindowSceneRule: false }
+    );
+    expect(bindings).toEqual([
+      expect.objectContaining({
+        externalId: externalRequest.externalId,
+        collectionName: "Default",
+        sceneId: scene.id,
+        pending: false,
+        switchingMode: "launch-pid",
+      }),
+    ]);
+    expect(mocks.registerLaunchSceneAssociation).toHaveBeenCalledWith(
+      {
+        collectionName: "Default",
+        externalId: externalRequest.externalId,
+        pid: externalRequest.processId,
+        sceneUuid: scene.id,
+        sceneName: scene.name,
+      },
+      expect.any(Set)
+    );
+    expect(mocks.upsertGeneratedWindowSceneRule).not.toHaveBeenCalled();
+  });
+
+  it("carries retry-proven descendant PIDs into the runtime scene association", async () => {
+    const resolver = vi.fn(async () => ({
+      status: "resolved" as const,
+      target: {
+        title: "Different Child Window",
+        durableSwitcherSafe: false,
+        launchProcessId: 7777,
+        selection: {
+          title: "Different Child Window",
+          targetKind: "window" as const,
+          captureValues: {
+            window_capture: "Different Child Window:GameWindow:game.exe",
+          },
+        },
+      },
+    }));
+    const { ensureGameProvisionedWithGsm } = await loadRuntime();
+
+    const result = await ensureGameProvisionedWithGsm(
+      {
+        ...externalRequest,
+        launchProcessIds: [12345, 7000, 7777],
+      },
+      resolver
+    );
+
+    expect(result.status).toBe("provisioned");
+    const lastCall =
+      mocks.registerLaunchSceneAssociation.mock.calls[
+        mocks.registerLaunchSceneAssociation.mock.calls.length - 1
+      ] ?? [];
+    const [, provenPids] = lastCall;
+    expect(provenPids).toEqual(new Set([12345, 7000, 7777]));
+  });
+
+  it("refreshes launch-scoped PID switching on a later bound launch without repairing a generic rule", async () => {
+    scenes = [scene];
+    bindings = [{
+      externalId: externalRequest.externalId,
+      collectionName: "Default",
+      sceneId: scene.id,
+      sceneName: scene.name,
+      pending: false,
+      switchingMode: "launch-pid",
+    }];
+    profile = {
+      sceneId: scene.id,
+      sceneName: scene.name,
+      textHookMode: "none",
+      ocrMode: "auto",
+      launchOverlay: false,
+      agentScriptPath: "",
+      launchDelaySeconds: 0,
+    };
+    switcherConfig = readySwitcherConfig([]);
+    const resolver = vi.fn(async () => ({
+      status: "not-ready" as const,
+      reason: "should not run",
+    }));
+    const { ensureGameProvisionedWithGsm } = await loadRuntime();
+
+    const result = await ensureGameProvisionedWithGsm(
+      {
+        ...externalRequest,
+        processId: 54321,
+        launchProcessIds: [54321, 60000, 60001],
+      },
+      resolver
+    );
+
+    expect(result.status).toBe("already-configured");
+    expect(resolver).not.toHaveBeenCalled();
+    expect(mocks.upsertGeneratedWindowSceneRule).not.toHaveBeenCalled();
+    expect(mocks.registerLaunchSceneAssociation).toHaveBeenCalledWith(
+      {
+        collectionName: "Default",
+        externalId: externalRequest.externalId,
+        pid: 54321,
+        sceneUuid: scene.id,
+        sceneName: scene.name,
+      },
+      new Set([54321, 60000, 60001])
+    );
   });
 
   it("keeps the same external id independently bound across OBS collections", async () => {
@@ -998,7 +1149,8 @@ describe("GSM game provisioning runtime binding", () => {
       "Default",
       "Arc the Lad II",
       "Arc the Lad II - RetroArch",
-      "retroarch.exe"
+      "retroarch.exe",
+      "durable-rule"
     );
     expect(mocks.createSceneWithCapture).toHaveBeenCalledWith({
       title: "Arc the Lad II - RetroArch",
@@ -1011,12 +1163,13 @@ describe("GSM game provisioning runtime binding", () => {
         game_capture:
           "Arc the Lad II - RetroArch:Qt6QWindowIcon:retroarch.exe",
       },
-    });
+    }, { persistWindowSceneRule: true });
     expect(mocks.upsertSceneLaunchProfile).toHaveBeenCalledWith({
       sceneId: scene.id,
       sceneName: scene.name,
       textHookMode: "none",
       ocrMode: "auto",
+      ocrPreset: "basic-default",
       launchOverlay: false,
       agentScriptPath: "",
       launchDelaySeconds: 0,

@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { ForegroundWindowSnapshot } from "../../shared/window_scene_switcher.js";
-import type { ObsWindowOption } from "../ui/obs-capture.js";
+import { mergeObsWindowItems, type ObsWindowOption } from "../ui/obs-capture.js";
 import {
   createForegroundGameCaptureTargetResolver,
   resolveForegroundCaptureTarget,
@@ -36,23 +36,102 @@ describe("game provisioning target resolver", () => {
       )
     ).toEqual({
       status: "resolved",
-      target: { title: windowOption.title, selection: windowOption },
+      target: {
+        title: windowOption.title,
+        selection: windowOption,
+        durableSwitcherSafe: false,
+        launchProcessId: 4242,
+      },
     });
   });
 
-  it("refuses a matching Playnite PID when the foreground target is still a wrapper", () => {
-    const wrapperForeground: ForegroundWindowSnapshot = {
+  it("preserves a Japanese PCSX2 window and uses process ownership instead of translated title identity", () => {
+    const title = "ドラゴンシャドウスペル";
+    const value = "ドラゴンシャドウスペル:Qt682QWindowIcon:pcsx2-qt.exe";
+    const [option] = mergeObsWindowItems([
+      { itemName: "[pcsx2-qt.exe]: " + title, itemValue: value, captureMode: "window_capture" },
+      { itemName: "[pcsx2-qt.exe]: " + title, itemValue: value, captureMode: "game_capture" },
+    ]);
+    const result = resolveForegroundCaptureTarget(
+      { displayName: "Dragon Shadow Spell", processId: 15300, externalId: "playnite:c1bd7a8f-7830-40ce-a908-fac7e4fef840" },
+      { hwnd: "1641430", pid: 15300, title, executableName: "pcsx2-qt.exe", capturedAt: 1, sequence: 1 },
+      [{ ...option, suggestedSceneName: title }]
+    );
+
+    expect(option).toMatchObject({
+      title,
+      captureValues: { window_capture: value, game_capture: value },
+    });
+    expect(result).toEqual({
+      status: "resolved",
+      target: {
+        title,
+        selection: { ...option, suggestedSceneName: title },
+        durableSwitcherSafe: false,
+        launchProcessId: 15300,
+      },
+    });
+  });
+
+  it("accepts a proven descendant process without comparing its title to the Playnite name", () => {
+    const childForeground: ForegroundWindowSnapshot = {
       ...foreground,
-      title: "Arc Launcher",
-      executableName: "launcher.exe",
+      pid: 7777,
+      title: "Completely Different Child Title",
+      executableName: "game.exe",
     };
-    const wrapperOption: ObsWindowOption = {
-      title: "Arc Launcher",
-      suggestedSceneName: "Arc Launcher",
-      value: "Arc Launcher:LauncherWindow:launcher.exe",
+    const childOption: ObsWindowOption = {
+      title: childForeground.title,
+      suggestedSceneName: childForeground.title,
+      value: "Completely Different Child Title:GameWindow:game.exe",
       targetKind: "window",
       captureValues: {
-        window_capture: "Arc Launcher:LauncherWindow:launcher.exe",
+        window_capture: "Completely Different Child Title:GameWindow:game.exe",
+      },
+    };
+
+    expect(
+      resolveForegroundCaptureTarget(
+        {
+          displayName: "Playnite Display Name",
+          processId: 4242,
+          externalId: "playnite:abc",
+        },
+        childForeground,
+        [childOption],
+        { isLaunchProcess: (pid) => pid === 4242 || pid === 7777 }
+      )
+    ).toEqual({
+      status: "resolved",
+      target: {
+        title: childOption.title,
+        selection: childOption,
+        durableSwitcherSafe: false,
+        launchProcessId: 7777,
+      },
+    });
+  });
+
+  it("uses the Playnite root PID as launch identity even for a generic emulator title", () => {
+    const emulatorForeground: ForegroundWindowSnapshot = {
+      ...foreground,
+      title: "RetroArch SwanStation 1.0.0 4d309c0",
+      executableName: "retroarch.exe",
+    };
+    const emulatorOption: ObsWindowOption = {
+      title: emulatorForeground.title,
+      suggestedSceneName: emulatorForeground.title,
+      value: JSON.stringify([
+        emulatorForeground.title,
+        "RetroArch",
+        "retroarch.exe",
+      ]),
+      targetKind: "window",
+      captureValues: {
+        window_capture:
+          "RetroArch SwanStation 1.0.0 4d309c0:RetroArch:retroarch.exe",
+        game_capture:
+          "RetroArch SwanStation 1.0.0 4d309c0:RetroArch:retroarch.exe",
       },
     };
 
@@ -63,20 +142,51 @@ describe("game provisioning target resolver", () => {
           processId: 4242,
           externalId: "playnite:abc",
         },
-        wrapperForeground,
-        [wrapperOption]
+        emulatorForeground,
+        [emulatorOption]
       )
-    ).toEqual(
-      expect.objectContaining({
-        status: "not-ready",
-        reason: expect.stringContaining(
-          "does not identify the requested game yet"
-        ),
-      })
-    );
+    ).toEqual({
+      status: "resolved",
+      target: {
+        title: emulatorOption.title,
+        selection: emulatorOption,
+        durableSwitcherSafe: false,
+        launchProcessId: 4242,
+      },
+    });
   });
 
-  it("allows matching PID to relax executable proof once game identity is exact", () => {
+  it("requires exact executable proof for launch-scoped exact-PID identity", () => {
+    const localizedForeground: ForegroundWindowSnapshot = {
+      ...foreground,
+      title: "ドラゴンシャドウスペル",
+      executableName: "pcsx2-qt.exe",
+    };
+    const wrongExecutable: ObsWindowOption = {
+      title: localizedForeground.title,
+      suggestedSceneName: localizedForeground.title,
+      value: "ドラゴンシャドウスペル:Qt682QWindowIcon:other.exe",
+      targetKind: "window",
+      captureValues: {
+        window_capture:
+          "ドラゴンシャドウスペル:Qt682QWindowIcon:other.exe",
+      },
+    };
+
+    expect(
+      resolveForegroundCaptureTarget(
+        {
+          displayName: "Dragon Shadow Spell",
+          processId: 4242,
+          externalId: "playnite:dss",
+        },
+        localizedForeground,
+        [wrongExecutable]
+      ).status
+    ).toBe("not-ready");
+  });
+
+  it("requires OBS executable proof even when the foreground PID is launch-owned", () => {
     const noExecutable: ObsWindowOption = {
       ...windowOption,
       captureValues: {},
@@ -93,10 +203,12 @@ describe("game provisioning target resolver", () => {
         foreground,
         [noExecutable]
       )
-    ).toEqual({
-      status: "resolved",
-      target: { title: noExecutable.title, selection: noExecutable },
-    });
+    ).toEqual(
+      expect.objectContaining({
+        status: "not-ready",
+        reason: expect.stringContaining("could not verify"),
+      })
+    );
   });
 
   it("treats a mismatched requested PID as not-ready while PID enforcement is active", () => {
@@ -109,7 +221,225 @@ describe("game provisioning target resolver", () => {
     ).toEqual(
       expect.objectContaining({
         status: "not-ready",
-        reason: expect.stringContaining("does not match requested PID"),
+        reason: expect.stringContaining("not part of the Playnite launch"),
+      })
+    );
+  });
+
+  it("uses a unique launch-owned OBS target when another app remains foreground", () => {
+    const terminalForeground: ForegroundWindowSnapshot = {
+      hwnd: "999",
+      pid: 8888,
+      title: "π - ke",
+      executableName: "WindowsTerminal.exe",
+      capturedAt: 2,
+      sequence: 2,
+    };
+    const realizeOption: ObsWindowOption = {
+      title: "_REALIZE -Panorama Luminary-",
+      suggestedSceneName: "_REALIZE -Panorama Luminary-",
+      value: "_REALIZE -Panorama Luminary-:Qt682QWindowIcon:pcsx2-qt.exe",
+      targetKind: "window",
+      captureValues: {
+        window_capture:
+          "_REALIZE -Panorama Luminary-:Qt682QWindowIcon:pcsx2-qt.exe",
+        game_capture:
+          "_REALIZE -Panorama Luminary-:Qt682QWindowIcon:pcsx2-qt.exe",
+      },
+    };
+
+    expect(
+      resolveForegroundCaptureTarget(
+        {
+          displayName: "Realize - Panorama Luminary",
+          processId: 53768,
+          externalId: "playnite:realize",
+        },
+        terminalForeground,
+        [realizeOption],
+        {
+          launchProcesses: [
+            {
+              pid: 53768,
+              executableName: "pcsx2-qt.exe",
+              windowTitle: "_REALIZE -Panorama Luminary-",
+            },
+          ],
+          processSnapshot: [
+            {
+              pid: 53768,
+              executableName: "pcsx2-qt.exe",
+              windowTitle: "_REALIZE -Panorama Luminary-",
+            },
+            {
+              pid: 8888,
+              executableName: "WindowsTerminal.exe",
+              windowTitle: "π - ke",
+            },
+          ],
+        }
+      )
+    ).toEqual({
+      status: "resolved",
+      target: {
+        title: realizeOption.title,
+        selection: realizeOption,
+        durableSwitcherSafe: false,
+        launchProcessId: 53768,
+      },
+    });
+  });
+
+  it("does not treat executable equality alone as launch-window ownership", () => {
+    const terminalForeground: ForegroundWindowSnapshot = {
+      hwnd: "999",
+      pid: 8888,
+      title: "π - ke",
+      executableName: "WindowsTerminal.exe",
+      capturedAt: 2,
+      sequence: 2,
+    };
+    const realizeOption: ObsWindowOption = {
+      title: "_REALIZE -Panorama Luminary-",
+      suggestedSceneName: "_REALIZE -Panorama Luminary-",
+      value: "_REALIZE -Panorama Luminary-:Qt682QWindowIcon:pcsx2-qt.exe",
+      targetKind: "window",
+      captureValues: {
+        window_capture:
+          "_REALIZE -Panorama Luminary-:Qt682QWindowIcon:pcsx2-qt.exe",
+      },
+    };
+
+    expect(
+      resolveForegroundCaptureTarget(
+        {
+          displayName: "Realize - Panorama Luminary",
+          processId: 53768,
+          externalId: "playnite:realize",
+        },
+        terminalForeground,
+        [realizeOption],
+        {
+          launchProcesses: [
+            { pid: 53768, executableName: "pcsx2-qt.exe" },
+          ],
+        }
+      ).status
+    ).toBe("not-ready");
+  });
+
+  it("fails closed when another live emulator process shares the same window identity", () => {
+    const terminalForeground: ForegroundWindowSnapshot = {
+      hwnd: "999",
+      pid: 8888,
+      title: "π - ke",
+      executableName: "WindowsTerminal.exe",
+      capturedAt: 2,
+      sequence: 2,
+    };
+    const realizeOption: ObsWindowOption = {
+      title: "_REALIZE -Panorama Luminary-",
+      suggestedSceneName: "_REALIZE -Panorama Luminary-",
+      value: "_REALIZE -Panorama Luminary-:Qt682QWindowIcon:pcsx2-qt.exe",
+      targetKind: "window",
+      captureValues: {
+        window_capture:
+          "_REALIZE -Panorama Luminary-:Qt682QWindowIcon:pcsx2-qt.exe",
+      },
+    };
+
+    expect(
+      resolveForegroundCaptureTarget(
+        {
+          displayName: "Realize - Panorama Luminary",
+          processId: 53768,
+          externalId: "playnite:realize",
+        },
+        terminalForeground,
+        [realizeOption],
+        {
+          launchProcesses: [
+            {
+              pid: 53768,
+              executableName: "pcsx2-qt.exe",
+              windowTitle: "_REALIZE -Panorama Luminary-",
+            },
+          ],
+          processSnapshot: [
+            {
+              pid: 53768,
+              executableName: "pcsx2-qt.exe",
+              windowTitle: "_REALIZE -Panorama Luminary-",
+            },
+            {
+              pid: 60000,
+              executableName: "pcsx2-qt.exe",
+              windowTitle: "_REALIZE -Panorama Luminary-",
+            },
+          ],
+        }
+      ).status
+    ).toBe("not-ready");
+  });
+
+  it("fails closed when multiple OBS windows share a launch-owned executable", () => {
+    const terminalForeground: ForegroundWindowSnapshot = {
+      hwnd: "999",
+      pid: 8888,
+      title: "π - ke",
+      executableName: "WindowsTerminal.exe",
+      capturedAt: 2,
+      sequence: 2,
+    };
+    const secondPcsx2Option: ObsWindowOption = {
+      ...windowOption,
+      title: "_REALIZE -Panorama Luminary-",
+      value: "_REALIZE -Panorama Luminary-:QtDifferentWindow:pcsx2-qt.exe",
+      captureValues: {
+        window_capture:
+          "_REALIZE -Panorama Luminary-:QtDifferentWindow:pcsx2-qt.exe",
+      },
+    };
+    const realizeOption: ObsWindowOption = {
+      ...secondPcsx2Option,
+      title: "_REALIZE -Panorama Luminary-",
+      value: "_REALIZE -Panorama Luminary-:Qt682QWindowIcon:pcsx2-qt.exe",
+      captureValues: {
+        window_capture:
+          "_REALIZE -Panorama Luminary-:Qt682QWindowIcon:pcsx2-qt.exe",
+      },
+    };
+
+    expect(
+      resolveForegroundCaptureTarget(
+        {
+          displayName: "Realize - Panorama Luminary",
+          processId: 53768,
+          externalId: "playnite:realize",
+        },
+        terminalForeground,
+        [realizeOption, secondPcsx2Option],
+        {
+          launchProcesses: [
+            {
+              pid: 53768,
+              executableName: "pcsx2-qt.exe",
+              windowTitle: "_REALIZE -Panorama Luminary-",
+            },
+          ],
+          processSnapshot: [
+            {
+              pid: 53768,
+              executableName: "pcsx2-qt.exe",
+              windowTitle: "_REALIZE -Panorama Luminary-",
+            },
+          ],
+        }
+      )
+    ).toEqual(
+      expect.objectContaining({
+        status: "not-ready",
+        reason: expect.stringContaining("Multiple OBS Setup Capture targets"),
       })
     );
   });

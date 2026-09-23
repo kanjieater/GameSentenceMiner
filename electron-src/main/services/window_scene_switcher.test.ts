@@ -139,6 +139,488 @@ describe("window scene switcher migration", () => {
   });
 });
 
+describe("launch-scoped scene associations", () => {
+  beforeEach(() => {
+    config = {
+      schemaVersion: 1,
+      collections: [
+        {
+          collectionName: "Games",
+          collectionFileName: "Games.json",
+          enabled: true,
+          migrationVersion: 1,
+          legacySwitcherDisabled: true,
+          rules: [],
+        },
+      ],
+    };
+  });
+
+  it("keeps PID associations in memory without changing persistent switcher config", async () => {
+    const service = await loadService();
+    const before = structuredClone(config);
+
+    service.registerLaunchSceneAssociation({
+      collectionName: "Games",
+      externalId: "playnite:arc",
+      pid: 4242,
+      sceneUuid: "scene-arc",
+      sceneName: "Arc the Lad II",
+    });
+
+    expect(service.getLaunchSceneAssociation(4242, "Games")).toEqual({
+      collectionName: "Games",
+      externalId: "playnite:arc",
+      pid: 4242,
+      sceneUuid: "scene-arc",
+      sceneName: "Arc the Lad II",
+    });
+    expect(config).toEqual(before);
+  });
+
+  it("accepts retry-proven descendant PIDs when registering a launch scene", async () => {
+    const service = await loadService();
+
+    service.registerLaunchSceneAssociation(
+      {
+        collectionName: "Games",
+        externalId: "playnite:child",
+        pid: 4242,
+        sceneUuid: "scene-child",
+        sceneName: "Child Game",
+      },
+      [4242, 7777]
+    );
+
+    expect(service.getLaunchSceneAssociation(7777, "Games")).toEqual(
+      expect.objectContaining({
+        externalId: "playnite:child",
+        pid: 4242,
+        sceneUuid: "scene-child",
+      })
+    );
+  });
+
+  it("replaces the old PID when the same game launches again", async () => {
+    const service = await loadService();
+
+    service.registerLaunchSceneAssociation({
+      collectionName: "Games",
+      externalId: "playnite:arc",
+      pid: 4242,
+      sceneUuid: "scene-arc",
+      sceneName: "Arc the Lad II",
+    });
+    service.registerLaunchSceneAssociation({
+      collectionName: "Games",
+      externalId: "playnite:arc",
+      pid: 5252,
+      sceneUuid: "scene-arc",
+      sceneName: "Arc the Lad II",
+    });
+
+    expect(service.getLaunchSceneAssociation(4242, "Games")).toBeNull();
+    expect(service.getLaunchSceneAssociation(5252, "Games")).not.toBeNull();
+  });
+
+  it("refuses to silently let two scenes claim the same PID", async () => {
+    const service = await loadService();
+
+    service.registerLaunchSceneAssociation({
+      collectionName: "Games",
+      externalId: "playnite:arc",
+      pid: 4242,
+      sceneUuid: "scene-arc",
+      sceneName: "Arc the Lad II",
+    });
+
+    expect(() =>
+      service.registerLaunchSceneAssociation({
+        collectionName: "Games",
+        externalId: "playnite:dss",
+        pid: 4242,
+        sceneUuid: "scene-dss",
+        sceneName: "Dragon Shadow Spell",
+      })
+    ).toThrow(/already associated/);
+  });
+
+  it("fails closed when two launch trees overlap", async () => {
+    const service = await loadService();
+
+    service.registerLaunchSceneAssociation({
+      collectionName: "Games",
+      externalId: "playnite:first",
+      pid: 100,
+      sceneUuid: "scene-first",
+      sceneName: "First",
+    });
+    service.registerLaunchSceneAssociation({
+      collectionName: "Games",
+      externalId: "playnite:second",
+      pid: 200,
+      sceneUuid: "scene-second",
+      sceneName: "Second",
+    });
+
+    expect(() =>
+      service.observeLaunchSceneProcessRelationships([
+        { pid: 200, parentPid: 100 },
+      ])
+    ).toThrow(/multiple launch-scoped scenes/);
+    expect(service.getLaunchSceneAssociation(200, "Games")).toBeNull();
+  });
+
+  it("prunes associations when their process is no longer alive", async () => {
+    const service = await loadService();
+
+    service.registerLaunchSceneAssociation({
+      collectionName: "Games",
+      externalId: "playnite:arc",
+      pid: 4242,
+      sceneUuid: "scene-arc",
+      sceneName: "Arc the Lad II",
+    });
+
+    expect(
+      service.pruneLaunchSceneAssociations(
+        () => false,
+        Date.now() + 10_000,
+        0
+      )
+    ).toBe(1);
+    expect(service.getLaunchSceneAssociation(4242, "Games")).toBeNull();
+  });
+
+  it("keeps observing lineage while the owned root stays foreground", async () => {
+    vi.useFakeTimers();
+    try {
+      const service = await loadService();
+      let currentScene = { id: "scene-root", name: "Root Scene" };
+      const switchScene = vi.fn(async (sceneUuid: string) => {
+        currentScene = { id: sceneUuid, name: "Realize" };
+      });
+      let relationshipSnapshot = 0;
+      const getProcessRelationships = vi.fn(async () => {
+        relationshipSnapshot += 1;
+        if (relationshipSnapshot === 1) {
+          return [
+            { pid: 4242, parentPid: 1, executableName: "root.exe" },
+            { pid: 5000, parentPid: 4242, executableName: "launcher.exe" },
+          ];
+        }
+        return [
+          { pid: 4242, parentPid: 1, executableName: "root.exe" },
+          { pid: 7777, parentPid: 5000, executableName: "pcsx2-qt.exe" },
+        ];
+      });
+
+      service.configureWindowSceneSwitcherRuntime({
+        isOBSConnected: () => true,
+        getCurrentCollectionName: async () => "Games",
+        getScenes: async () => [
+          { id: "scene-root", name: "Root Scene" },
+          { id: "scene-realize", name: "Realize" },
+        ],
+        getCurrentScene: async () => currentScene,
+        switchScene,
+        suggestRule: async () => null,
+        restoreForegroundWindow: () => {},
+        requestForegroundSnapshot: () => {},
+        getProcessRelationships,
+      });
+      await Promise.resolve();
+      await Promise.resolve();
+
+      service.registerLaunchSceneAssociation({
+        collectionName: "Games",
+        externalId: "playnite:realize",
+        pid: 4242,
+        sceneUuid: "scene-realize",
+        sceneName: "Realize",
+      });
+
+      // The root is already owned and remains foreground while a transient
+      // intermediate appears. GSM must still sample lineage here.
+      service.handleForegroundWindowSnapshot({
+        hwnd: "1000",
+        pid: 4242,
+        title: "Root Launcher",
+        executableName: "root.exe",
+        capturedAt: Date.now(),
+        sequence: 1,
+      });
+      await vi.advanceTimersByTimeAsync(200);
+
+      expect(getProcessRelationships).toHaveBeenCalled();
+      expect(service.getLaunchSceneAssociation(5000, "Games")).toEqual(
+        expect.objectContaining({
+          externalId: "playnite:realize",
+          sceneUuid: "scene-realize",
+        })
+      );
+
+      // The intermediate has now disappeared. Because it was learned while
+      // the root was foreground, the final child can still be proven later.
+      service.handleForegroundWindowSnapshot({
+        hwnd: "2000",
+        pid: 7777,
+        title: "_REALIZE -Panorama Luminary-",
+        executableName: "pcsx2-qt.exe",
+        capturedAt: Date.now(),
+        sequence: 2,
+      });
+      await vi.advanceTimersByTimeAsync(200);
+
+      expect(service.getLaunchSceneAssociation(7777, "Games")).toEqual(
+        expect.objectContaining({
+          externalId: "playnite:realize",
+          sceneUuid: "scene-realize",
+        })
+      );
+      expect(switchScene).toHaveBeenCalledWith("scene-realize");
+      service.shutdownWindowSceneSwitcher();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("switches by a proven descendant PID even after the Playnite root exits", async () => {
+    vi.useFakeTimers();
+    try {
+      const service = await loadService();
+      let currentScene = { id: "scene-other", name: "Other" };
+      const switchScene = vi.fn(async (sceneUuid: string) => {
+        currentScene = { id: sceneUuid, name: "Child Game" };
+      });
+
+      service.configureWindowSceneSwitcherRuntime({
+        isOBSConnected: () => true,
+        getCurrentCollectionName: async () => "Games",
+        getScenes: async () => [
+          { id: "scene-other", name: "Other" },
+          { id: "scene-child", name: "Child Game" },
+        ],
+        getCurrentScene: async () => currentScene,
+        switchScene,
+        suggestRule: async () => null,
+        restoreForegroundWindow: () => {},
+        requestForegroundSnapshot: () => {},
+        getProcessRelationships: async () => [
+          { pid: 7777, parentPid: 4242 },
+        ],
+      });
+      await Promise.resolve();
+      await Promise.resolve();
+
+      service.registerLaunchSceneAssociation({
+        collectionName: "Games",
+        externalId: "playnite:child",
+        pid: 4242,
+        sceneUuid: "scene-child",
+        sceneName: "Child Game",
+      });
+      service.handleForegroundWindowSnapshot({
+        hwnd: "5678",
+        pid: 7777,
+        title: "Different Child Window",
+        executableName: "game.exe",
+        capturedAt: Date.now(),
+        sequence: 1,
+      });
+
+      await vi.advanceTimersByTimeAsync(200);
+
+      expect(service.getLaunchSceneAssociation(7777, "Games")).toEqual(
+        expect.objectContaining({
+          externalId: "playnite:child",
+          pid: 4242,
+          sceneUuid: "scene-child",
+        })
+      );
+      expect(switchScene).toHaveBeenCalledOnce();
+      expect(switchScene).toHaveBeenCalledWith("scene-child");
+      expect(config.collections[0].rules).toEqual([]);
+      service.shutdownWindowSceneSwitcher();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("refreshes a launch-scoped capture even when OBS is already on that scene", async () => {
+    vi.useFakeTimers();
+    try {
+      const service = await loadService();
+      const currentScene = { id: "scene-arc", name: "Arc the Lad II" };
+      const switchScene = vi.fn(async () => {});
+      const refreshCaptureSource = vi.fn(async () => true);
+
+      service.configureWindowSceneSwitcherRuntime({
+        isOBSConnected: () => true,
+        getCurrentCollectionName: async () => "Games",
+        getScenes: async () => [currentScene],
+        getCurrentScene: async () => currentScene,
+        switchScene,
+        refreshCaptureSource,
+        suggestRule: async () => null,
+        restoreForegroundWindow: () => {},
+        requestForegroundSnapshot: () => {},
+      });
+      await Promise.resolve();
+      await Promise.resolve();
+
+      service.registerLaunchSceneAssociation({
+        collectionName: "Games",
+        externalId: "playnite:arc",
+        pid: 4242,
+        sceneUuid: "scene-arc",
+        sceneName: "Arc the Lad II",
+      });
+      service.handleForegroundWindowSnapshot({
+        hwnd: "1234",
+        pid: 4242,
+        title: "PCSX2",
+        executableName: "pcsx2-qt.exe",
+        capturedAt: Date.now(),
+        sequence: 1,
+      });
+
+      await vi.advanceTimersByTimeAsync(200);
+
+      expect(switchScene).not.toHaveBeenCalled();
+      expect(refreshCaptureSource).toHaveBeenCalledOnce();
+      expect(refreshCaptureSource).toHaveBeenCalledWith("scene-arc");
+      service.shutdownWindowSceneSwitcher();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("switches by launch PID even when there is intentionally no durable title rule", async () => {
+    vi.useFakeTimers();
+    try {
+      const service = await loadService();
+      let currentScene = { id: "scene-other", name: "Other" };
+      const switchScene = vi.fn(async (sceneUuid: string) => {
+        currentScene = { id: sceneUuid, name: "Arc the Lad II" };
+      });
+      const refreshCaptureSource = vi.fn(async () => true);
+
+      service.configureWindowSceneSwitcherRuntime({
+        isOBSConnected: () => true,
+        getCurrentCollectionName: async () => "Games",
+        getScenes: async () => [
+          { id: "scene-other", name: "Other" },
+          { id: "scene-arc", name: "Arc the Lad II" },
+        ],
+        getCurrentScene: async () => currentScene,
+        switchScene,
+        refreshCaptureSource,
+        suggestRule: async () => null,
+        restoreForegroundWindow: () => {},
+        requestForegroundSnapshot: () => {},
+      });
+      await Promise.resolve();
+      await Promise.resolve();
+
+      service.registerLaunchSceneAssociation({
+        collectionName: "Games",
+        externalId: "playnite:arc",
+        pid: 4242,
+        sceneUuid: "scene-arc",
+        sceneName: "Arc the Lad II",
+      });
+      service.handleForegroundWindowSnapshot({
+        hwnd: "1234",
+        pid: 4242,
+        title: "RetroArch SwanStation 1.0.0 4d309c0",
+        executableName: "retroarch.exe",
+        capturedAt: Date.now(),
+        sequence: 1,
+      });
+
+      await vi.advanceTimersByTimeAsync(200);
+
+      expect(switchScene).toHaveBeenCalledOnce();
+      expect(switchScene).toHaveBeenCalledWith("scene-arc");
+      expect(refreshCaptureSource).toHaveBeenCalledOnce();
+      expect(refreshCaptureSource).toHaveBeenCalledWith("scene-arc");
+      expect(config.collections[0].rules).toEqual([]);
+      service.shutdownWindowSceneSwitcher();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+  it("does not refresh capture sources for ordinary persistent-rule switches", async () => {
+    vi.useFakeTimers();
+    try {
+      const service = await loadService();
+      let currentScene = { id: "scene-other", name: "Other" };
+      const switchScene = vi.fn(async (sceneUuid: string) => {
+        currentScene = { id: sceneUuid, name: "Steins;Gate" };
+      });
+      const refreshCaptureSource = vi.fn(async () => true);
+
+      config = {
+        schemaVersion: 1,
+        collections: [
+          {
+            collectionName: "Games",
+            collectionFileName: "Games.json",
+            enabled: true,
+            migrationVersion: 1,
+            legacySwitcherDisabled: true,
+            rules: [
+              {
+                sceneUuid: "scene-game",
+                sceneName: "Steins;Gate",
+                titlePattern: "Steins;Gate",
+                executableName: "game.exe",
+                enabled: true,
+                source: "manual",
+              },
+            ],
+          },
+        ],
+      };
+
+      service.configureWindowSceneSwitcherRuntime({
+        isOBSConnected: () => true,
+        getCurrentCollectionName: async () => "Games",
+        getScenes: async () => [
+          { id: "scene-other", name: "Other" },
+          { id: "scene-game", name: "Steins;Gate" },
+        ],
+        getCurrentScene: async () => currentScene,
+        switchScene,
+        refreshCaptureSource,
+        suggestRule: async () => null,
+        restoreForegroundWindow: () => {},
+        requestForegroundSnapshot: () => {},
+      });
+      await Promise.resolve();
+      await Promise.resolve();
+
+      service.handleForegroundWindowSnapshot({
+        hwnd: "2000",
+        pid: 9000,
+        title: "Steins;Gate",
+        executableName: "game.exe",
+        capturedAt: Date.now(),
+        sequence: 1,
+      });
+      await vi.advanceTimersByTimeAsync(200);
+
+      expect(switchScene).toHaveBeenCalledWith("scene-game");
+      expect(refreshCaptureSource).not.toHaveBeenCalled();
+      service.shutdownWindowSceneSwitcher();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
 describe("window scene switcher hook status", () => {
   beforeEach(() => {
     config = { schemaVersion: 1, collections: [] };

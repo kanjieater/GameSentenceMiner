@@ -1484,6 +1484,41 @@ async function processImageIsObs(pid: number): Promise<boolean> {
     }
 }
 
+async function getAnyRunningOBSPid(): Promise<number | null> {
+    const managedPid = await getRunningManagedOBSPid();
+    if (managedPid) {
+        return managedPid;
+    }
+
+    try {
+        if (isWindows()) {
+            const { stdout } = await execFileAsync('tasklist', [
+                '/NH',
+                '/FO',
+                'CSV',
+                '/FI',
+                'IMAGENAME eq obs64.exe',
+            ]);
+            const match = String(stdout ?? '').match(/"obs(?:64)?\.exe","(\d+)"/i);
+            return match ? Number.parseInt(match[1], 10) : null;
+        }
+
+        const { stdout } = await execFileAsync('ps', ['-A', '-o', 'pid=,comm=']);
+        for (const line of String(stdout ?? '').split(/\r?\n/)) {
+            const match = line.trim().match(/^(\d+)\s+(.+)$/);
+            if (match && /(^|\/)obs(?:$|\s)/i.test(match[2].trim())) {
+                return Number.parseInt(match[1], 10);
+            }
+        }
+    } catch (error) {
+        // Process discovery is a safety guard. If it fails, the managed PID
+        // checks still apply; log so a duplicate-launch diagnosis has evidence.
+        logObsError('Failed to discover an already-running OBS process:', error);
+    }
+
+    return null;
+}
+
 async function getRunningManagedOBSPid(): Promise<number | null> {
     const ownedPid = getOwnedOBSProcessPid();
     if (ownedPid) {
@@ -1523,42 +1558,36 @@ function buildOBSLaunchArgs(baseArgs: string[], config: ElectronOBSStartupConfig
     return args;
 }
 
-async function isOBSBusyForSceneSwitcherMigration(): Promise<boolean> {
-    try {
-        await getOBSConnection();
-        const [recordStatus, streamStatus] = await Promise.all([
-            callOBS('GetRecordStatus'),
-            callOBS('GetStreamStatus'),
-        ]);
-        return recordStatus?.outputActive === true || streamStatus?.outputActive === true;
-    } catch {
-        // If an already-running OBS cannot be inspected, do not force it closed.
-        return true;
-    }
-}
-
 async function launchOBSFromElectronInternal(
     options: ElectronOBSProcessOptions = {}
 ): Promise<ElectronOBSProcessResult> {
+    if (process.env.GSM_SOURCE_E2E_REUSE_EXISTING_OBS === '1') {
+        electronOBSLaunchStatus = 'skipped';
+        return { status: 'skipped' };
+    }
+
     const config = getElectronOBSStartupConfig();
     if (!config.openObs && !options.ignoreOpenConfig) {
         electronOBSLaunchStatus = 'skipped';
         return { status: 'skipped' };
     }
 
-    const existingPid = await getRunningManagedOBSPid();
+    const managedPid = await getRunningManagedOBSPid();
+    const existingPid = managedPid ?? await getAnyRunningOBSPid();
     const switcherMigrationPending =
         await hasPendingLegacyWindowSceneSwitcherMigration(SCENE_CONFIG_PATH);
     if (existingPid) {
-        if (!options.forceRestart && !switcherMigrationPending) {
+        // Automatic startup must never close/relaunch an OBS instance that is
+        // already open. A pending migration can wait until the next clean
+        // startup. Only an explicit forceRestart may restart an OBS process
+        // that this GSM instance actually owns/manages.
+        if (!options.forceRestart || !managedPid) {
             electronOBSLaunchStatus = 'already-running';
-            return { status: 'already-running', pid: existingPid };
-        }
-        if (switcherMigrationPending && await isOBSBusyForSceneSwitcherMigration()) {
-            electronOBSLaunchStatus = 'already-running';
-            console.warn(
-                '[SceneSwitcher] OBS migration deferred while OBS is recording, streaming, or unavailable.'
-            );
+            if (switcherMigrationPending) {
+                console.warn(
+                    '[SceneSwitcher] OBS migration deferred because OBS is already running.'
+                );
+            }
             return { status: 'already-running', pid: existingPid };
         }
         await closeOBSFromElectron({ ignoreCloseConfig: true, reason: options.reason });
@@ -1636,7 +1665,7 @@ export function launchOBSFromElectron(
                 electronOBSLaunchStatus === 'launched' ||
                 electronOBSLaunchStatus === 'already-running'
             ) {
-                const runningPid = await getRunningManagedOBSPid();
+                const runningPid = await getAnyRunningOBSPid();
                 if (runningPid) {
                     return { status: 'already-running', pid: runningPid } as const;
                 }
@@ -2114,7 +2143,10 @@ async function isOBSHealthy(): Promise<boolean> {
 }
 
 // Shared scene creation logic
-export async function createSceneWithCapture(window: ObsSceneCaptureWindowSelection): Promise<void> {
+export async function createSceneWithCapture(
+    window: ObsSceneCaptureWindowSelection,
+    options: { persistWindowSceneRule?: boolean } = {}
+): Promise<void> {
     if (!isWindows() && !isLinux()) {
         throw new Error(
             'Automatic OBS capture setup is currently only supported on Windows and Linux XComposite or PipeWire.'
@@ -2240,7 +2272,7 @@ export async function createSceneWithCapture(window: ObsSceneCaptureWindowSelect
         }
     }
 
-    if (sceneInfo.switcherRegex) {
+    if (sceneInfo.switcherRegex && options.persistWindowSceneRule !== false) {
         const collectionName = await getCurrentOBSSceneCollectionName();
         const captureWindowValue =
             window.captureValues?.game_capture ??
@@ -3534,6 +3566,75 @@ export async function getSceneCaptureMode(
             error?.message ?? error
         );
         return null;
+    }
+}
+
+/**
+ * Refresh an existing Windows capture input in place.
+ *
+ * Window Capture can retain the first matching HWND when an emulator is
+ * relaunched with the same class/title. Re-applying the current settings makes
+ * OBS resolve the live window without rebuilding the scene or its bindings.
+ */
+export async function refreshSceneCaptureSource(sceneUuid: string): Promise<boolean> {
+    const trimmedSceneUuid = sceneUuid.trim();
+    if (!trimmedSceneUuid) {
+        return false;
+    }
+
+    try {
+        await getOBSConnection();
+        const response = await callOBS('GetSceneItemList', {
+            sceneUuid: trimmedSceneUuid,
+        });
+        const sceneItems = Array.isArray(response?.sceneItems)
+            ? response.sceneItems
+            : [];
+        const windowCaptures = sceneItems.filter(
+            (item: any) => item?.inputKind === 'window_capture'
+        );
+        if (windowCaptures.length === 0) {
+            return false;
+        }
+
+        const enabledWindowCaptures = windowCaptures.filter(
+            (item: any) => item.sceneItemEnabled !== false
+        );
+        const candidates =
+            enabledWindowCaptures.length > 0
+                ? enabledWindowCaptures
+                : windowCaptures;
+
+        const namedCandidates = candidates.filter((item: any) =>
+            String(item.sourceName ?? '').endsWith(' - Window Capture')
+        );
+        const captureItem =
+            namedCandidates.length === 1
+                ? namedCandidates[0]
+                : candidates.length === 1
+                    ? candidates[0]
+                    : null;
+        if (!captureItem) {
+            return false;
+        }
+
+        const inputSettings = await getInputSettingsForSceneItem(captureItem);
+        if (!inputSettings || Object.keys(inputSettings).length === 0) {
+            return false;
+        }
+
+        await callOBS('SetInputSettings', {
+            inputName: String(captureItem.sourceName ?? ''),
+            inputSettings,
+            overlay: false,
+        });
+        return true;
+    } catch (error: any) {
+        logObsError(
+            `Error refreshing capture source for scene "${trimmedSceneUuid}":`,
+            error?.message ?? error
+        );
+        return false;
     }
 }
 
