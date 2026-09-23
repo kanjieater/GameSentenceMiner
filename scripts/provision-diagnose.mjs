@@ -50,8 +50,7 @@ function parseObsValue(raw) {
 
 function normalize(value) { return String(value ?? "").trim().toLocaleLowerCase(); }
 
-async function getObsWindowOptions() {
-  const dataDir = process.env.GSM_DATA_DIR || path.join(process.env.APPDATA, "GameSentenceMiner");
+async function getObsWindowOptions(dataDir) {
   const configPaths = [
     path.join(dataDir, "obs-studio", "config", "obs-studio", "plugin_config", "obs-websocket", "config.json"),
     path.join(process.env.APPDATA, "obs-studio", "plugin_config", "obs-websocket", "config.json"),
@@ -126,13 +125,16 @@ async function getObsWindowOptions() {
 const resolverPath = pathToFileURL(path.join(repoRoot, "dist", "main", "services", "game_provisioning_target_resolver.js")).href;
 const capturePath = pathToFileURL(path.join(repoRoot, "dist", "main", "ui", "obs-capture.js")).href;
 const lineagePath = pathToFileURL(path.join(repoRoot, "dist", "main", "services", "process_lineage.js")).href;
+const dataDirPath = pathToFileURL(path.join(repoRoot, "dist", "main", "data_dir.js")).href;
 const { resolveForegroundCaptureTarget } = await import(resolverPath);
 const { mergeObsWindowItems } = await import(capturePath);
 const { LaunchProcessTree, getWindowsProcessRelationships } = await import(lineagePath);
+const { getBaseDir } = await import(dataDirPath);
+const dataDir = getBaseDir();
 const foreground = getForegroundSnapshot();
 let obsResult;
 try {
-  obsResult = await getObsWindowOptions();
+  obsResult = await getObsWindowOptions(dataDir);
 } catch (error) {
   obsResult = {
     options: [],
@@ -172,7 +174,7 @@ const planned = resolution.status === "resolved" ? {
     : null,
   persistentWindowSceneRule: resolution.target.durableSwitcherSafe !== false,
 } : null;
-const electronConfigPath = path.join(process.env.APPDATA, "GameSentenceMiner", "electron", "config.json");
+const electronConfigPath = path.join(dataDir, "electron", "config.json");
 const electronConfig = fs.existsSync(electronConfigPath) ? readJson(electronConfigPath) : {};
 const bindings = (electronConfig.gameProvisioningBindings || []).filter(
   (item) => item.externalId === externalId
@@ -206,6 +208,7 @@ const autoOcrReady =
 
 console.log(JSON.stringify({
   mode: "read-only",
+  dataDir,
   requested: request,
   foreground,
   lineage: processId ? {
