@@ -259,7 +259,11 @@ describe("game provisioning target resolver", () => {
         [realizeOption],
         {
           launchProcesses: [
-            { pid: 53768, executableName: "pcsx2-qt.exe" },
+            {
+              pid: 53768,
+              executableName: "pcsx2-qt.exe",
+              windowTitle: "_REALIZE -Panorama Luminary-",
+            },
           ],
         }
       )
@@ -274,6 +278,44 @@ describe("game provisioning target resolver", () => {
     });
   });
 
+  it("does not treat executable equality alone as launch-window ownership", () => {
+    const terminalForeground: ForegroundWindowSnapshot = {
+      hwnd: "999",
+      pid: 8888,
+      title: "π - ke",
+      executableName: "WindowsTerminal.exe",
+      capturedAt: 2,
+      sequence: 2,
+    };
+    const realizeOption: ObsWindowOption = {
+      title: "_REALIZE -Panorama Luminary-",
+      suggestedSceneName: "_REALIZE -Panorama Luminary-",
+      value: "_REALIZE -Panorama Luminary-:Qt682QWindowIcon:pcsx2-qt.exe",
+      targetKind: "window",
+      captureValues: {
+        window_capture:
+          "_REALIZE -Panorama Luminary-:Qt682QWindowIcon:pcsx2-qt.exe",
+      },
+    };
+
+    expect(
+      resolveForegroundCaptureTarget(
+        {
+          displayName: "Realize - Panorama Luminary",
+          processId: 53768,
+          externalId: "playnite:realize",
+        },
+        terminalForeground,
+        [realizeOption],
+        {
+          launchProcesses: [
+            { pid: 53768, executableName: "pcsx2-qt.exe" },
+          ],
+        }
+      ).status
+    ).toBe("not-ready");
+  });
+
   it("fails closed when multiple OBS windows share a launch-owned executable", () => {
     const terminalForeground: ForegroundWindowSnapshot = {
       hwnd: "999",
@@ -285,11 +327,11 @@ describe("game provisioning target resolver", () => {
     };
     const secondPcsx2Option: ObsWindowOption = {
       ...windowOption,
-      title: "Another PCSX2 Game",
-      value: "Another PCSX2 Game:Qt682QWindowIcon:pcsx2-qt.exe",
+      title: "_REALIZE -Panorama Luminary-",
+      value: "_REALIZE -Panorama Luminary-:QtDifferentWindow:pcsx2-qt.exe",
       captureValues: {
         window_capture:
-          "Another PCSX2 Game:Qt682QWindowIcon:pcsx2-qt.exe",
+          "_REALIZE -Panorama Luminary-:QtDifferentWindow:pcsx2-qt.exe",
       },
     };
     const realizeOption: ObsWindowOption = {
