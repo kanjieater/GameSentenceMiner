@@ -987,6 +987,22 @@ def test_obs_screenshot_thread_capture_original_size_falls_back_when_source_dime
     assert thread.get_capture_original_size(2560, 1440) == {"width": 2560, "height": 1440}
 
 
+def test_obs_screenshot_thread_prefers_scene_preprocess_override(monkeypatch):
+    config = SimpleNamespace(rectangles=[], obs_capture_preprocess="crt_scanlines")
+    thread = run_module.OBSScreenshotThread(config, screen_capture_on_combo=False)
+    monkeypatch.setattr(run_module, "get_ocr_obs_capture_preprocess_mode", lambda: "grayscale")
+
+    assert thread.get_capture_preprocess_mode() == "crt_scanlines"
+
+
+def test_obs_screenshot_thread_falls_back_to_global_preprocess(monkeypatch):
+    config = SimpleNamespace(rectangles=[], obs_capture_preprocess=None)
+    thread = run_module.OBSScreenshotThread(config, screen_capture_on_combo=False)
+    monkeypatch.setattr(run_module, "get_ocr_obs_capture_preprocess_mode", lambda: "grayscale")
+
+    assert thread.get_capture_preprocess_mode() == "grayscale"
+
+
 def test_apply_ipc_config_reload_refreshes_hotkeys_and_clipboard_toggle(monkeypatch):
     events = []
 
