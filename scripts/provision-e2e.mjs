@@ -8,6 +8,7 @@
  * active, because OCR is a live backend/session concern rather than config.
  */
 import { execFileSync } from "node:child_process";
+import fs from "node:fs";
 
 const args = process.argv.slice(2);
 if (!args.includes("--confirm-write")) {
@@ -28,6 +29,48 @@ function runNode(script, forwardedArgs) {
 const forwarded = args.filter((arg) => arg !== "--confirm-write");
 const diagnose = () =>
   JSON.parse(runNode("scripts/provision-diagnose.mjs", forwarded));
+
+function restoreForeground(hwnd) {
+  if (!hwnd) return;
+  try {
+    execFileSync(
+      "powershell.exe",
+      [
+        "-NoProfile",
+        "-NonInteractive",
+        "-Command",
+        `Add-Type @'
+using System;
+using System.Runtime.InteropServices;
+public static class FocusRestore {
+  [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hWnd);
+}
+'@; [void][FocusRestore]::SetForegroundWindow([IntPtr]${String(hwnd)})`,
+      ],
+      { stdio: "ignore" }
+    );
+  } catch {
+    // Best-effort only. The final active-scene/OCR checks still fail closed.
+  }
+}
+
+function isOcrProcessRunning() {
+  try {
+    const stdout = execFileSync(
+      "powershell.exe",
+      [
+        "-NoProfile",
+        "-NonInteractive",
+        "-Command",
+        "(Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -match 'GameSentenceMiner\\.ocr\\.gsm_ocr' } | Select-Object -First 1 -ExpandProperty ProcessId)",
+      ],
+      { encoding: "utf8" }
+    ).trim();
+    return /^\d+$/.test(stdout);
+  } catch {
+    return false;
+  }
+}
 
 const before = diagnose();
 if (before.result !== "safe-to-provision") {
@@ -56,6 +99,9 @@ try {
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const deadline = Date.now() + 30_000;
 let after = null;
+
+await sleep(2_000);
+restoreForeground(before.foreground?.hwnd);
 
 while (Date.now() < deadline) {
   await sleep(1_000);
@@ -89,33 +135,88 @@ while (Date.now() < deadline) {
     launchScoped &&
     noPersistentTitleRule
   ) {
-    console.log(
-      JSON.stringify(
-        {
-          verified: true,
-          preflight: {
-            foreground: before.foreground,
-            lineage: before.lineage,
-            resolver: before.resolver,
-            planned: before.planned,
+    restoreForeground(before.foreground?.hwnd);
+
+    const ocrDeadline = Date.now() + 20_000;
+    let ocrLogStarted = false;
+    let ocrProcessRunning = false;
+    let switchedToBoundScene = false;
+    let live = after;
+
+    while (Date.now() < ocrDeadline) {
+      await sleep(1_000);
+      try {
+        live = diagnose();
+      } catch {
+        // Keep polling while source Electron/OBS settles.
+      }
+
+      const boundSceneId = completeBinding.sceneId;
+      switchedToBoundScene =
+        live?.obs?.currentProgramScene?.id === boundSceneId ||
+        live?.obs?.currentProgramScene?.name === completeBinding.sceneName;
+
+      const logPath = apply?.logPath;
+      if (logPath && fs.existsSync(logPath)) {
+        const log = fs.readFileSync(logPath, "utf8");
+        ocrLogStarted = log.includes(
+          "Starting OCR process (source=auto-launcher, mode=auto)."
+        );
+      }
+      ocrProcessRunning = isOcrProcessRunning();
+
+      if (switchedToBoundScene && ocrLogStarted && ocrProcessRunning) {
+        console.log(
+          JSON.stringify(
+            {
+              verified: true,
+              preflight: {
+                foreground: before.foreground,
+                lineage: before.lineage,
+                resolver: before.resolver,
+                planned: before.planned,
+              },
+              apply,
+              provisioned: {
+                binding: completeBinding,
+                scenes: live.existing.boundScenes,
+                sceneProfiles: live.existing.sceneProfiles,
+                persistentWindowSceneRules:
+                  live.existing.persistentWindowSceneRules,
+                autoOcrReady: live.existing.autoOcrReady,
+              },
+              runtime: {
+                currentProgramScene: live.obs.currentProgramScene,
+                ocrAutoStartLogged: ocrLogStarted,
+                ocrProcessRunning,
+              },
+              nextGate:
+                "Generate visible Japanese text and confirm OCR output is observed, then relaunch through Playnite and confirm the same scene/binding is reused with the new process tree.",
+            },
+            null,
+            2
+          )
+        );
+        process.exit(0);
+      }
+
+      restoreForeground(before.foreground?.hwnd);
+    }
+
+    throw new Error(
+      "Provisioning config was created, but live runtime verification did not complete. " +
+        JSON.stringify(
+          {
+            switchedToBoundScene,
+            ocrLogStarted,
+            ocrProcessRunning,
+            currentProgramScene: live?.obs?.currentProgramScene ?? null,
+            logPath: apply?.logPath ?? null,
           },
-          apply,
-          provisioned: {
-            binding: completeBinding,
-            scenes: after.existing.boundScenes,
-            sceneProfiles: after.existing.sceneProfiles,
-            persistentWindowSceneRules:
-              after.existing.persistentWindowSceneRules,
-            autoOcrReady: after.existing.autoOcrReady,
-          },
-          nextGate:
-            "Keep the game foregrounded and verify live OCR starts/writes text, then relaunch the same Playnite game to prove binding reuse with a new process tree.",
-        },
-        null,
-        2
-      )
+          null,
+          2
+        )
     );
-    process.exit(0);
   }
 }
 
