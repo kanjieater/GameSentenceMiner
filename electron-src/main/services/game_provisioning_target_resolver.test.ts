@@ -76,6 +76,81 @@ describe("game provisioning target resolver", () => {
     );
   });
 
+  it("allows a stable exact-PID emulator target as launch-scoped identity", () => {
+    const emulatorForeground: ForegroundWindowSnapshot = {
+      ...foreground,
+      title: "RetroArch SwanStation 1.0.0 4d309c0",
+      executableName: "retroarch.exe",
+    };
+    const emulatorOption: ObsWindowOption = {
+      title: emulatorForeground.title,
+      suggestedSceneName: emulatorForeground.title,
+      value: JSON.stringify([
+        emulatorForeground.title,
+        "RetroArch",
+        "retroarch.exe",
+      ]),
+      targetKind: "window",
+      captureValues: {
+        window_capture:
+          "RetroArch SwanStation 1.0.0 4d309c0:RetroArch:retroarch.exe",
+        game_capture:
+          "RetroArch SwanStation 1.0.0 4d309c0:RetroArch:retroarch.exe",
+      },
+    };
+
+    expect(
+      resolveForegroundCaptureTarget(
+        {
+          displayName: "Arc the Lad II",
+          processId: 4242,
+          externalId: "playnite:abc",
+        },
+        emulatorForeground,
+        [emulatorOption],
+        { allowLaunchScopedExactPid: true }
+      )
+    ).toEqual({
+      status: "resolved",
+      target: {
+        title: emulatorOption.title,
+        selection: emulatorOption,
+        durableSwitcherSafe: false,
+      },
+    });
+  });
+
+  it("requires exact executable proof for launch-scoped exact-PID identity", () => {
+    const localizedForeground: ForegroundWindowSnapshot = {
+      ...foreground,
+      title: "ドラゴンシャドウスペル",
+      executableName: "pcsx2-qt.exe",
+    };
+    const wrongExecutable: ObsWindowOption = {
+      title: localizedForeground.title,
+      suggestedSceneName: localizedForeground.title,
+      value: "ドラゴンシャドウスペル:Qt682QWindowIcon:other.exe",
+      targetKind: "window",
+      captureValues: {
+        window_capture:
+          "ドラゴンシャドウスペル:Qt682QWindowIcon:other.exe",
+      },
+    };
+
+    expect(
+      resolveForegroundCaptureTarget(
+        {
+          displayName: "Dragon Shadow Spell",
+          processId: 4242,
+          externalId: "playnite:dss",
+        },
+        localizedForeground,
+        [wrongExecutable],
+        { allowLaunchScopedExactPid: true }
+      ).status
+    ).toBe("not-ready");
+  });
+
   it("allows matching PID to relax executable proof once game identity is exact", () => {
     const noExecutable: ObsWindowOption = {
       ...windowOption,
