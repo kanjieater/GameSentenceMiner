@@ -629,11 +629,15 @@ def _normalize_ocr_preprocess_mode(preprocess_mode=None, grayscale=False):
         "greyscale": "grayscale",
         "sharpen": "grayscale_unsharp",
         "enhanced": "grayscale_unsharp",
+        "crt": "crt_scanlines",
+        "crt_scanline": "crt_scanlines",
+        "scanline": "crt_scanlines",
+        "scanlines": "crt_scanlines",
     }
     normalized = aliases.get(raw_mode, raw_mode)
     if not normalized:
         normalized = "grayscale" if grayscale else "none"
-    if normalized not in {"none", "grayscale", "grayscale_unsharp"}:
+    if normalized not in {"none", "grayscale", "grayscale_unsharp", "crt_scanlines"}:
         normalized = "none"
     if grayscale and normalized == "none":
         normalized = "grayscale"
@@ -648,7 +652,15 @@ def _apply_ocr_preprocessing(img, preprocess_mode=None, grayscale=False):
     if normalized_mode == "none":
         return img
 
-    from PIL import ImageFilter, ImageOps
+    from PIL import Image, ImageFilter, ImageOps
+
+    if normalized_mode == "crt_scanlines":
+        cleaned = img
+        if cleaned.height > 1080:
+            target_height = 1080
+            target_width = max(1, round(cleaned.width * (target_height / cleaned.height)))
+            cleaned = cleaned.resize((target_width, target_height), Image.Resampling.BOX)
+        return ImageOps.autocontrast(cleaned, cutoff=1)
 
     gray = ImageOps.grayscale(img)
     if normalized_mode == "grayscale":
