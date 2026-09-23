@@ -24,6 +24,7 @@ export interface ProvisioningSceneProfile {
   sceneName: string;
   textHookMode: "none" | "agent" | "textractor" | "luna";
   ocrMode: "none" | "auto" | "manual";
+  ocrPreset?: "basic-default";
   launchOverlay: boolean;
   agentScriptPath: string;
   launchDelaySeconds: number;
@@ -134,6 +135,7 @@ function buildGenericAutoOcrProfile(
     sceneName: scene.name,
     textHookMode: "none",
     ocrMode: "auto",
+    ocrPreset: "basic-default",
     launchOverlay: false,
     agentScriptPath: "",
     launchDelaySeconds: 0,
