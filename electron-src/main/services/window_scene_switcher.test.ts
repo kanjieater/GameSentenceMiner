@@ -292,6 +292,99 @@ describe("launch-scoped scene associations", () => {
     expect(service.getLaunchSceneAssociation(4242, "Games")).toBeNull();
   });
 
+  it("keeps observing lineage while the owned root stays foreground", async () => {
+    vi.useFakeTimers();
+    try {
+      const service = await loadService();
+      let currentScene = { id: "scene-root", name: "Root Scene" };
+      const switchScene = vi.fn(async (sceneUuid: string) => {
+        currentScene = { id: sceneUuid, name: "Realize" };
+      });
+      let relationshipSnapshot = 0;
+      const getProcessRelationships = vi.fn(async () => {
+        relationshipSnapshot += 1;
+        if (relationshipSnapshot === 1) {
+          return [
+            { pid: 4242, parentPid: 1, executableName: "root.exe" },
+            { pid: 5000, parentPid: 4242, executableName: "launcher.exe" },
+          ];
+        }
+        return [
+          { pid: 4242, parentPid: 1, executableName: "root.exe" },
+          { pid: 7777, parentPid: 5000, executableName: "pcsx2-qt.exe" },
+        ];
+      });
+
+      service.configureWindowSceneSwitcherRuntime({
+        isOBSConnected: () => true,
+        getCurrentCollectionName: async () => "Games",
+        getScenes: async () => [
+          { id: "scene-root", name: "Root Scene" },
+          { id: "scene-realize", name: "Realize" },
+        ],
+        getCurrentScene: async () => currentScene,
+        switchScene,
+        suggestRule: async () => null,
+        restoreForegroundWindow: () => {},
+        requestForegroundSnapshot: () => {},
+        getProcessRelationships,
+      });
+      await Promise.resolve();
+      await Promise.resolve();
+
+      service.registerLaunchSceneAssociation({
+        collectionName: "Games",
+        externalId: "playnite:realize",
+        pid: 4242,
+        sceneUuid: "scene-realize",
+        sceneName: "Realize",
+      });
+
+      // The root is already owned and remains foreground while a transient
+      // intermediate appears. GSM must still sample lineage here.
+      service.handleForegroundWindowSnapshot({
+        hwnd: "1000",
+        pid: 4242,
+        title: "Root Launcher",
+        executableName: "root.exe",
+        capturedAt: Date.now(),
+        sequence: 1,
+      });
+      await vi.advanceTimersByTimeAsync(200);
+
+      expect(getProcessRelationships).toHaveBeenCalled();
+      expect(service.getLaunchSceneAssociation(5000, "Games")).toEqual(
+        expect.objectContaining({
+          externalId: "playnite:realize",
+          sceneUuid: "scene-realize",
+        })
+      );
+
+      // The intermediate has now disappeared. Because it was learned while
+      // the root was foreground, the final child can still be proven later.
+      service.handleForegroundWindowSnapshot({
+        hwnd: "2000",
+        pid: 7777,
+        title: "_REALIZE -Panorama Luminary-",
+        executableName: "pcsx2-qt.exe",
+        capturedAt: Date.now(),
+        sequence: 2,
+      });
+      await vi.advanceTimersByTimeAsync(200);
+
+      expect(service.getLaunchSceneAssociation(7777, "Games")).toEqual(
+        expect.objectContaining({
+          externalId: "playnite:realize",
+          sceneUuid: "scene-realize",
+        })
+      );
+      expect(switchScene).toHaveBeenCalledWith("scene-realize");
+      service.shutdownWindowSceneSwitcher();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("switches by a proven descendant PID even after the Playnite root exits", async () => {
     vi.useFakeTimers();
     try {
