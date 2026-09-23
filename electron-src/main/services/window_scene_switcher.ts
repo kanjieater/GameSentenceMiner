@@ -3,6 +3,10 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import log from 'electron-log/main.js';
+import {
+    LaunchProcessTree,
+    type ProcessRelationship,
+} from './process_lineage.js';
 
 import {
     findWindowSceneSwitcherCandidates,
@@ -62,6 +66,7 @@ export interface WindowSceneSwitcherRuntimeDependencies {
     ) => Promise<{ titlePattern: string; executableName?: string } | null>;
     requestForegroundSnapshot: () => void;
     restoreForegroundWindow: (hwnd: string) => void;
+    getProcessRelationships?: () => Promise<ProcessRelationship[]>;
 }
 
 export interface WindowSceneSwitcherMigrationResult {
@@ -414,12 +419,25 @@ export function upsertGeneratedWindowSceneRule(
 export interface LaunchSceneAssociation {
     collectionName: string;
     externalId: string;
+    /** Playnite-reported root PID for this launch. */
     pid: number;
     sceneUuid: string;
     sceneName: string;
 }
 
-const launchSceneAssociations = new Map<number, LaunchSceneAssociation>();
+interface LaunchSceneTracker {
+    association: LaunchSceneAssociation;
+    tree: LaunchProcessTree;
+    registeredAt: number;
+    lastLiveAt: number;
+}
+
+const launchSceneTrackers = new Map<string, LaunchSceneTracker>();
+const LAUNCH_ASSOCIATION_EXIT_GRACE_MS = 5_000;
+
+function launchSceneTrackerKey(collectionName: string, externalId: string): string {
+    return collectionName + "\u0000" + externalId;
+}
 
 let dependencies: WindowSceneSwitcherRuntimeDependencies | null = null;
 let activeCollectionName = '';
@@ -455,15 +473,49 @@ function isProcessAlive(pid: number): boolean {
     }
 }
 
+export function observeLaunchSceneProcessRelationships(
+    relationships: Iterable<ProcessRelationship>
+): void {
+    const snapshot = [...relationships];
+    for (const tracker of launchSceneTrackers.values()) {
+        tracker.tree.observe(snapshot);
+    }
+
+    const pidOwners = new Map<number, LaunchSceneTracker>();
+    for (const tracker of launchSceneTrackers.values()) {
+        for (const pid of tracker.tree.getKnownPids()) {
+            const existing = pidOwners.get(pid);
+            if (
+                existing &&
+                (existing.association.collectionName !== tracker.association.collectionName ||
+                    existing.association.externalId !== tracker.association.externalId)
+            ) {
+                throw new Error(
+                    `PID ${pid} is claimed by multiple launch-scoped scenes; refusing ambiguous process ownership.`
+                );
+            }
+            pidOwners.set(pid, tracker);
+        }
+    }
+}
+
 export function pruneLaunchSceneAssociations(
-    processAlive: (pid: number) => boolean = isProcessAlive
+    processAlive: (pid: number) => boolean = isProcessAlive,
+    now = Date.now(),
+    exitGraceMs = LAUNCH_ASSOCIATION_EXIT_GRACE_MS
 ): number {
     let removed = 0;
-    for (const [pid] of launchSceneAssociations) {
-        if (!processAlive(pid)) {
-            launchSceneAssociations.delete(pid);
-            removed += 1;
+    for (const [key, tracker] of launchSceneTrackers) {
+        const anyAlive = tracker.tree.getKnownPids().some(processAlive);
+        if (anyAlive) {
+            tracker.lastLiveAt = now;
+            continue;
         }
+        if (now - Math.max(tracker.registeredAt, tracker.lastLiveAt) < exitGraceMs) {
+            continue;
+        }
+        launchSceneTrackers.delete(key);
+        removed += 1;
     }
     return removed;
 }
@@ -472,11 +524,15 @@ export function getLaunchSceneAssociation(
     pid: number,
     collectionName = activeCollectionName
 ): LaunchSceneAssociation | null {
-    const association = launchSceneAssociations.get(pid);
-    if (!association || association.collectionName !== collectionName) {
-        return null;
+    for (const tracker of launchSceneTrackers.values()) {
+        if (
+            tracker.association.collectionName === collectionName &&
+            tracker.tree.owns(pid)
+        ) {
+            return { ...tracker.association };
+        }
     }
-    return { ...association };
+    return null;
 }
 
 export function registerLaunchSceneAssociation(
@@ -496,32 +552,32 @@ export function registerLaunchSceneAssociation(
         !normalized.sceneUuid ||
         !normalized.sceneName
     ) {
-        throw new Error('A collection, external id, positive PID, and scene are required for launch-scoped switching.');
+        throw new Error('A collection, external id, positive root PID, and scene are required for launch-scoped switching.');
     }
 
-    const atPid = launchSceneAssociations.get(normalized.pid);
-    if (
-        atPid &&
-        (atPid.collectionName !== normalized.collectionName ||
-            atPid.externalId !== normalized.externalId ||
-            atPid.sceneUuid !== normalized.sceneUuid)
-    ) {
-        throw new Error(
-            `PID ${normalized.pid} is already associated with scene "${atPid.sceneName}"; refusing to silently reassign it.`
-        );
-    }
-
-    for (const [pid, existing] of launchSceneAssociations) {
+    for (const tracker of launchSceneTrackers.values()) {
         if (
-            existing.collectionName === normalized.collectionName &&
-            existing.externalId === normalized.externalId &&
-            pid !== normalized.pid
+            tracker.tree.owns(normalized.pid) &&
+            (tracker.association.collectionName !== normalized.collectionName ||
+                tracker.association.externalId !== normalized.externalId ||
+                tracker.association.sceneUuid !== normalized.sceneUuid)
         ) {
-            launchSceneAssociations.delete(pid);
+            throw new Error(
+                `PID ${normalized.pid} is already associated with scene "${tracker.association.sceneName}"; refusing to silently reassign it.`
+            );
         }
     }
 
-    launchSceneAssociations.set(normalized.pid, normalized);
+    const now = Date.now();
+    launchSceneTrackers.set(
+        launchSceneTrackerKey(normalized.collectionName, normalized.externalId),
+        {
+            association: normalized,
+            tree: new LaunchProcessTree(normalized.pid),
+            registeredAt: now,
+            lastLiveAt: now,
+        }
+    );
 
     if (
         latestForeground?.pid === normalized.pid &&
@@ -533,11 +589,24 @@ export function registerLaunchSceneAssociation(
 }
 
 function removeLaunchSceneAssociationsForScene(sceneUuid: string): void {
-    for (const [pid, association] of launchSceneAssociations) {
-        if (association.sceneUuid === sceneUuid) {
-            launchSceneAssociations.delete(pid);
+    for (const [key, tracker] of launchSceneTrackers) {
+        if (tracker.association.sceneUuid === sceneUuid) {
+            launchSceneTrackers.delete(key);
         }
     }
+}
+
+async function refreshLaunchSceneOwnershipForForeground(pid: number): Promise<void> {
+    if (
+        getLaunchSceneAssociation(pid) ||
+        launchSceneTrackers.size === 0 ||
+        !dependencies?.getProcessRelationships
+    ) {
+        return;
+    }
+
+    const relationships = await dependencies.getProcessRelationships();
+    observeLaunchSceneProcessRelationships(relationships);
 }
 
 function describeForeground(snapshot: ForegroundWindowSnapshot): string {
@@ -768,6 +837,7 @@ async function evaluateForeground(generation: number): Promise<void> {
         );
         return;
     }
+    await refreshLaunchSceneOwnershipForForeground(latestForeground.pid);
     const launchAssociation = getLaunchSceneAssociation(
         latestForeground.pid,
         collection.collectionName
@@ -1197,12 +1267,12 @@ export async function reconcileWindowSceneSwitcherRules(scenes: ObsSceneRef[]): 
         return;
     }
     const scenesById = new Map(scenes.map((scene) => [scene.id, scene.name]));
-    for (const [pid, association] of launchSceneAssociations) {
+    for (const [key, tracker] of launchSceneTrackers) {
         if (
-            association.collectionName === activeCollectionName &&
-            !scenesById.has(association.sceneUuid)
+            tracker.association.collectionName === activeCollectionName &&
+            !scenesById.has(tracker.association.sceneUuid)
         ) {
-            launchSceneAssociations.delete(pid);
+            launchSceneTrackers.delete(key);
         }
     }
     collection.rules = collection.rules.flatMap((rule) => {
@@ -1383,7 +1453,7 @@ export function shutdownWindowSceneSwitcher(): void {
     pendingConflict = null;
     closeConflictWindow();
     dependencies = null;
-    launchSceneAssociations.clear();
+    launchSceneTrackers.clear();
     latestDecisionKey = '';
     diagnosticLastLoggedAt.clear();
 }
