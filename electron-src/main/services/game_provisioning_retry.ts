@@ -94,6 +94,10 @@ export async function ensureGameProvisionedWithRetry(
               isLaunchProcess: (pid: number) =>
                 attempt >= launchOwnershipDelayAttempts &&
                 launchTree.owns(pid),
+              launchProcesses:
+                attempt >= launchOwnershipDelayAttempts
+                  ? launchTree.getKnownProcesses()
+                  : [],
             }
           : {}),
       }
