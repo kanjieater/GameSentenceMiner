@@ -108,6 +108,7 @@ import {
     hasEnsureGameCommand,
 } from './services/game_provisioning_command.js';
 import { ensureGameProvisionedWithRetry } from './services/game_provisioning_retry.js';
+import { getWindowsProcessRelationships } from './services/process_lineage.js';
 import type {
     ForegroundWindowSnapshot,
     WindowSceneSwitcherHookStatus,
@@ -1644,6 +1645,7 @@ async function createWindow() {
         restoreForegroundWindow: (hwnd) => {
             sendBackendCommand('restore_foreground_window', { hwnd });
         },
+        getProcessRelationships: getWindowsProcessRelationships,
     });
 
     registerMainIPC({
@@ -2564,6 +2566,7 @@ const gameProvisioningRetryDependencies = {
     isSupported: isWindows,
     getForegroundSnapshot: getLatestForegroundWindowSnapshot,
     getWindowOptions: getOBSWindowOptionsForProvisioning,
+    getProcessRelationships: getWindowsProcessRelationships,
 };
 
 async function processGameProvisioningArgs(args: string[]): Promise<void> {
