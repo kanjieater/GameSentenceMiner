@@ -529,8 +529,11 @@ describe("GSM game provisioning runtime binding", () => {
     );
 
     expect(result.status).toBe("provisioned");
-    const [, provenPids] =
-      mocks.registerLaunchSceneAssociation.mock.calls.at(-1) ?? [];
+    const lastCall =
+      mocks.registerLaunchSceneAssociation.mock.calls[
+        mocks.registerLaunchSceneAssociation.mock.calls.length - 1
+      ] ?? [];
+    const [, provenPids] = lastCall;
     expect(provenPids).toEqual(new Set([12345, 7000, 7777]));
   });
 
