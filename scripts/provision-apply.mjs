@@ -10,6 +10,7 @@
  *   npm run provision:apply -- --name "Game" --external-id "playnite:<guid>" --pid 123 --confirm-write
  */
 import { spawn, execFileSync } from "node:child_process";
+import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -86,12 +87,18 @@ const electronExe = path.join(
   "electron.exe"
 );
 
+const logDirectory = path.join(repoRoot, "temp");
+fs.mkdirSync(logDirectory, { recursive: true });
+const logPath = path.join(logDirectory, "provision-source-electron.log");
+const logFd = fs.openSync(logPath, "a");
+
 const child = spawn(electronExe, [repoRoot, token], {
   cwd: repoRoot,
   detached: true,
-  stdio: "ignore",
+  stdio: ["ignore", logFd, logFd],
   windowsHide: false,
 });
+fs.closeSync(logFd);
 child.unref();
 
 console.log(
@@ -103,6 +110,7 @@ console.log(
       processId,
       transport: "source-electron-single-token",
       electronPid: child.pid ?? null,
+      logPath,
     },
     null,
     2
