@@ -160,6 +160,8 @@ interface FrontPageState {
     ocrConfigs?: OCRGame[];
 }
 
+export type GameProvisioningSwitchingMode = "durable-rule" | "launch-pid";
+
 export interface GameProvisioningBinding {
     externalId: string;
     collectionName: string;
@@ -168,6 +170,7 @@ export interface GameProvisioningBinding {
     pending: boolean;
     captureTitle?: string;
     executableName?: string;
+    switchingMode?: GameProvisioningSwitchingMode;
 }
 
 interface StoreConfig {
@@ -973,7 +976,8 @@ export function reserveGameProvisioningBinding(
     collectionName: string,
     sceneName: string,
     captureTitle: string,
-    executableName?: string
+    executableName?: string,
+    switchingMode: GameProvisioningSwitchingMode = "durable-rule"
 ): void {
     const normalizedExternalId = (externalId ?? "").trim();
     const normalizedCollectionName =
@@ -1008,6 +1012,7 @@ export function reserveGameProvisioningBinding(
         pending: true,
         captureTitle: normalizedCaptureTitle,
         executableName: normalizedExecutableName || undefined,
+        switchingMode,
     });
     store.set("gameProvisioningBindings", bindings);
 }
@@ -1015,7 +1020,8 @@ export function reserveGameProvisioningBinding(
 export function upsertGameProvisioningBinding(
     externalId: string,
     collectionName: string,
-    scene: ObsScene
+    scene: ObsScene,
+    switchingMode?: GameProvisioningSwitchingMode
 ): void {
     const normalizedExternalId = (externalId ?? "").trim();
     const normalizedCollectionName =
@@ -1027,18 +1033,21 @@ export function upsertGameProvisioningBinding(
     }
 
     const bindings = store.get("gameProvisioningBindings", []);
+    const index = bindings.findIndex(
+        (binding) =>
+            binding.externalId === normalizedExternalId &&
+            binding.collectionName === normalizedCollectionName
+    );
+    const existing = index >= 0 ? bindings[index] : undefined;
     const next: GameProvisioningBinding = {
         externalId: normalizedExternalId,
         collectionName: normalizedCollectionName,
         sceneId,
         sceneName,
         pending: false,
+        switchingMode:
+            switchingMode ?? existing?.switchingMode ?? "durable-rule",
     };
-    const index = bindings.findIndex(
-        (binding) =>
-            binding.externalId === normalizedExternalId &&
-            binding.collectionName === normalizedCollectionName
-    );
     if (index >= 0) {
         bindings[index] = next;
     } else {
