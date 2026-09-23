@@ -95,7 +95,21 @@ async function getObsWindowOptions() {
       // match remains authoritative; the name is only ownership evidence.
       suggestedSceneName: option.title,
     }));
-    return { options, errors };
+    const [collectionInfo, sceneInfo] = await Promise.all([
+      obs.call("GetSceneCollectionList").catch(() => null),
+      obs.call("GetSceneList").catch(() => null),
+    ]);
+    return {
+      options,
+      errors,
+      activeCollection: collectionInfo?.currentSceneCollectionName ?? null,
+      scenes: Array.isArray(sceneInfo?.scenes)
+        ? sceneInfo.scenes.map((scene) => ({
+            id: scene.sceneUuid ?? "",
+            name: scene.sceneName ?? "",
+          }))
+        : [],
+    };
   } finally {
     await obs.disconnect();
   }
@@ -112,7 +126,12 @@ let obsResult;
 try {
   obsResult = await getObsWindowOptions();
 } catch (error) {
-  obsResult = { options: [], errors: [error instanceof Error ? error.message : String(error)] };
+  obsResult = {
+    options: [],
+    errors: [error instanceof Error ? error.message : String(error)],
+    activeCollection: null,
+    scenes: [],
+  };
 }
 const request = {
   displayName,
@@ -146,8 +165,35 @@ const planned = resolution.status === "resolved" ? {
 } : null;
 const electronConfigPath = path.join(process.env.APPDATA, "GameSentenceMiner", "electron", "config.json");
 const electronConfig = fs.existsSync(electronConfigPath) ? readJson(electronConfigPath) : {};
-const activeCollection = (electronConfig.windowSceneSwitcher?.collections || []).find((item) => item.enabled);
-const bindings = (electronConfig.gameProvisioningBindings || []).filter((item) => item.externalId === externalId);
+const bindings = (electronConfig.gameProvisioningBindings || []).filter(
+  (item) => item.externalId === externalId
+);
+const sceneProfiles = electronConfig.sceneLaunchProfiles || [];
+const switcherCollections = electronConfig.windowSceneSwitcher?.collections || [];
+const matchingProfiles = sceneProfiles.filter((profile) =>
+  bindings.some(
+    (binding) =>
+      (binding.sceneId && profile.sceneId === binding.sceneId) ||
+      (!binding.sceneId && binding.sceneName === profile.sceneName)
+  )
+);
+const matchingRules = switcherCollections.flatMap((collection) =>
+  (collection.rules || [])
+    .filter((rule) =>
+      bindings.some((binding) => binding.sceneId && rule.sceneUuid === binding.sceneId)
+    )
+    .map((rule) => ({ collectionName: collection.collectionName, ...rule }))
+);
+const boundScenes = obsResult.scenes.filter((scene) =>
+  bindings.some(
+    (binding) =>
+      (binding.sceneId && binding.sceneId === scene.id) ||
+      (!binding.sceneId && binding.sceneName === scene.name)
+  )
+);
+const autoOcrReady =
+  bindings.some((binding) => !binding.pending && Boolean(binding.sceneId)) &&
+  matchingProfiles.some((profile) => profile.ocrMode === "auto");
 
 console.log(JSON.stringify({
   mode: "read-only",
@@ -159,9 +205,22 @@ console.log(JSON.stringify({
     foregroundOwned: launchTree?.owns(foreground.pid) ?? false,
     sampledRelationships: processRelationships.length,
   } : null,
-  obs: { candidateCount: obsResult.options.length, candidates: obsResult.options, errors: obsResult.errors },
+  obs: {
+    activeCollection: obsResult.activeCollection,
+    sceneCount: obsResult.scenes.length,
+    scenes: obsResult.scenes,
+    candidateCount: obsResult.options.length,
+    candidates: obsResult.options,
+    errors: obsResult.errors,
+  },
   resolver: resolution,
   planned,
-  existing: { activeCollection: activeCollection?.collectionName ?? null, bindings },
+  existing: {
+    bindings,
+    boundScenes,
+    sceneProfiles: matchingProfiles,
+    persistentWindowSceneRules: matchingRules,
+    autoOcrReady,
+  },
   result: resolution.status === "resolved" ? "safe-to-provision" : "not-ready",
 }, null, 2));
