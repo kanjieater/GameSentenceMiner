@@ -233,8 +233,76 @@ describe("launch-scoped scene associations", () => {
       sceneName: "Arc the Lad II",
     });
 
-    expect(service.pruneLaunchSceneAssociations(() => false)).toBe(1);
+    expect(
+      service.pruneLaunchSceneAssociations(
+        () => false,
+        Date.now() + 10_000,
+        0
+      )
+    ).toBe(1);
     expect(service.getLaunchSceneAssociation(4242, "Games")).toBeNull();
+  });
+
+  it("switches by a proven descendant PID even after the Playnite root exits", async () => {
+    vi.useFakeTimers();
+    try {
+      const service = await loadService();
+      let currentScene = { id: "scene-other", name: "Other" };
+      const switchScene = vi.fn(async (sceneUuid: string) => {
+        currentScene = { id: sceneUuid, name: "Child Game" };
+      });
+
+      service.configureWindowSceneSwitcherRuntime({
+        isOBSConnected: () => true,
+        getCurrentCollectionName: async () => "Games",
+        getScenes: async () => [
+          { id: "scene-other", name: "Other" },
+          { id: "scene-child", name: "Child Game" },
+        ],
+        getCurrentScene: async () => currentScene,
+        switchScene,
+        suggestRule: async () => null,
+        restoreForegroundWindow: () => {},
+        requestForegroundSnapshot: () => {},
+        getProcessRelationships: async () => [
+          { pid: 7777, parentPid: 4242 },
+        ],
+      });
+      await Promise.resolve();
+      await Promise.resolve();
+
+      service.registerLaunchSceneAssociation({
+        collectionName: "Games",
+        externalId: "playnite:child",
+        pid: 4242,
+        sceneUuid: "scene-child",
+        sceneName: "Child Game",
+      });
+      service.handleForegroundWindowSnapshot({
+        hwnd: "5678",
+        pid: 7777,
+        title: "Different Child Window",
+        executableName: "game.exe",
+        capturedAt: Date.now(),
+        sequence: 1,
+      });
+
+      await vi.advanceTimersByTimeAsync(200);
+
+      expect(service.getLaunchSceneAssociation(7777, "Games")).toEqual(
+        expect.objectContaining({
+          externalId: "playnite:child",
+          pid: 4242,
+          sceneUuid: "scene-child",
+        })
+      );
+      expect(switchScene).toHaveBeenCalledOnce();
+      expect(switchScene).toHaveBeenCalledWith("scene-child");
+      expect(config.collections[0].rules).toEqual([]);
+      service.shutdownWindowSceneSwitcher();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("switches by launch PID even when there is intentionally no durable title rule", async () => {
