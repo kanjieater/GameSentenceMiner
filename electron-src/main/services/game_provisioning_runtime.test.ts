@@ -489,14 +489,49 @@ describe("GSM game provisioning runtime binding", () => {
         switchingMode: "launch-pid",
       }),
     ]);
-    expect(mocks.registerLaunchSceneAssociation).toHaveBeenCalledWith({
-      collectionName: "Default",
-      externalId: externalRequest.externalId,
-      pid: externalRequest.processId,
-      sceneUuid: scene.id,
-      sceneName: scene.name,
-    });
+    expect(mocks.registerLaunchSceneAssociation).toHaveBeenCalledWith(
+      {
+        collectionName: "Default",
+        externalId: externalRequest.externalId,
+        pid: externalRequest.processId,
+        sceneUuid: scene.id,
+        sceneName: scene.name,
+      },
+      expect.any(Set)
+    );
     expect(mocks.upsertGeneratedWindowSceneRule).not.toHaveBeenCalled();
+  });
+
+  it("carries retry-proven descendant PIDs into the runtime scene association", async () => {
+    const resolver = vi.fn(async () => ({
+      status: "resolved" as const,
+      target: {
+        title: "Different Child Window",
+        durableSwitcherSafe: false,
+        launchProcessId: 7777,
+        selection: {
+          title: "Different Child Window",
+          targetKind: "window" as const,
+          captureValues: {
+            window_capture: "Different Child Window:GameWindow:game.exe",
+          },
+        },
+      },
+    }));
+    const { ensureGameProvisionedWithGsm } = await loadRuntime();
+
+    const result = await ensureGameProvisionedWithGsm(
+      {
+        ...externalRequest,
+        launchProcessIds: [12345, 7000, 7777],
+      },
+      resolver
+    );
+
+    expect(result.status).toBe("provisioned");
+    const [, provenPids] =
+      mocks.registerLaunchSceneAssociation.mock.calls.at(-1) ?? [];
+    expect(provenPids).toEqual(new Set([12345, 7000, 7777]));
   });
 
   it("refreshes launch-scoped PID switching on a later bound launch without repairing a generic rule", async () => {
@@ -533,13 +568,16 @@ describe("GSM game provisioning runtime binding", () => {
     expect(result.status).toBe("already-configured");
     expect(resolver).not.toHaveBeenCalled();
     expect(mocks.upsertGeneratedWindowSceneRule).not.toHaveBeenCalled();
-    expect(mocks.registerLaunchSceneAssociation).toHaveBeenCalledWith({
-      collectionName: "Default",
-      externalId: externalRequest.externalId,
-      pid: 54321,
-      sceneUuid: scene.id,
-      sceneName: scene.name,
-    });
+    expect(mocks.registerLaunchSceneAssociation).toHaveBeenCalledWith(
+      {
+        collectionName: "Default",
+        externalId: externalRequest.externalId,
+        pid: 54321,
+        sceneUuid: scene.id,
+        sceneName: scene.name,
+      },
+      expect.any(Set)
+    );
   });
 
   it("keeps the same external id independently bound across OBS collections", async () => {
