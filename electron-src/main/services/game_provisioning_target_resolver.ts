@@ -19,6 +19,7 @@ export interface GameProvisioningTargetResolverDependencies {
 
 export interface GameProvisioningTargetResolverOptions {
   enforceProcessId?: boolean;
+  allowLaunchScopedExactPid?: boolean;
 }
 
 function normalizeTitle(value: string | undefined): string {
@@ -130,7 +131,12 @@ export function resolveForegroundCaptureTarget(
   // actual window title (localized titles, generic emulator windows, etc.).
   // That evidence is deliberately launch-scoped: the discovered title/exe may
   // be too generic to persist as a durable scene-switcher rule.
-  if (!belongsToRequestedGame && requestedPid !== undefined && !pidMismatch) {
+  if (
+    !belongsToRequestedGame &&
+    requestedPid !== undefined &&
+    !pidMismatch &&
+    resolverOptions.allowLaunchScopedExactPid === true
+  ) {
     if (
       !foregroundExecutable ||
       !selectedExecutable ||
