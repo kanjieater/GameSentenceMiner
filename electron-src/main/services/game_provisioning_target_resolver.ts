@@ -152,7 +152,10 @@ export function resolveForegroundCaptureTarget(
       target: {
         title: selection.title,
         selection,
-        ...(belongsToRequestedGame ? {} : { durableSwitcherSafe: false }),
+        // Process ownership is the durable Playnite integration model. Do not
+        // turn a coincidentally matching window title into persistent game
+        // identity; a fresh launch PID/tree will be supplied on every launch.
+        durableSwitcherSafe: false,
         launchProcessId: foreground.pid,
       },
     };
