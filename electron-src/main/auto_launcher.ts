@@ -367,7 +367,7 @@ export class AutoLauncher {
                     scene,
                     promptForAreaSelection: false,
                     source: "auto-launcher",
-                    ocrPreset,
+                    ...(ocrPreset ? { ocrPreset } : {}),
                 });
             } else {
                 startManualOCR({ source: "auto-launcher" });
