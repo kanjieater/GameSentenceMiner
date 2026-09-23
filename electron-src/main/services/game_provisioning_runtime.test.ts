@@ -31,6 +31,7 @@ const mocks = vi.hoisted(() => ({
   getCurrentOBSSceneCollectionName: vi.fn(),
   getWindowTitleFromSourceForProvisioning: vi.fn(),
   suggestWindowSceneSwitcherRuleForProvisioning: vi.fn(),
+  registerLaunchSceneAssociation: vi.fn(),
   upsertGeneratedWindowSceneRule: vi.fn(),
   upsertSceneLaunchProfile: vi.fn(),
   getGameProvisioningBinding: vi.fn(),
@@ -53,6 +54,7 @@ vi.mock("../ui/obs.js", () => ({
 }));
 
 vi.mock("./window_scene_switcher.js", () => ({
+  registerLaunchSceneAssociation: mocks.registerLaunchSceneAssociation,
   upsertGeneratedWindowSceneRule: mocks.upsertGeneratedWindowSceneRule,
 }));
 
@@ -129,7 +131,8 @@ describe("GSM game provisioning runtime binding", () => {
         requestedCollectionName: string,
         sceneName: string,
         captureTitle: string,
-        executableName?: string
+        executableName?: string,
+        switchingMode: "durable-rule" | "launch-pid" = "durable-rule"
       ) => {
         const existing = bindings.find(
           (binding) =>
@@ -145,6 +148,7 @@ describe("GSM game provisioning runtime binding", () => {
             pending: true,
             captureTitle,
             executableName,
+            switchingMode,
           });
         }
       }
@@ -153,14 +157,22 @@ describe("GSM game provisioning runtime binding", () => {
       (
         externalId: string,
         requestedCollectionName: string,
-        boundScene: { id: string; name: string }
+        boundScene: { id: string; name: string },
+        switchingMode?: "durable-rule" | "launch-pid"
       ) => {
+        const existing = bindings.find(
+          (binding) =>
+            binding.externalId === externalId &&
+            binding.collectionName === requestedCollectionName
+        );
         const next = {
           externalId,
           collectionName: requestedCollectionName,
           sceneId: boundScene.id,
           sceneName: boundScene.name,
           pending: false,
+          switchingMode:
+            switchingMode ?? existing?.switchingMode ?? "durable-rule",
         };
         const index = bindings.findIndex(
           (binding) =>
