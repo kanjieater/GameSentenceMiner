@@ -178,6 +178,29 @@ describe("launch-scoped scene associations", () => {
     expect(config).toEqual(before);
   });
 
+  it("accepts retry-proven descendant PIDs when registering a launch scene", async () => {
+    const service = await loadService();
+
+    service.registerLaunchSceneAssociation(
+      {
+        collectionName: "Games",
+        externalId: "playnite:child",
+        pid: 4242,
+        sceneUuid: "scene-child",
+        sceneName: "Child Game",
+      },
+      [4242, 7777]
+    );
+
+    expect(service.getLaunchSceneAssociation(7777, "Games")).toEqual(
+      expect.objectContaining({
+        externalId: "playnite:child",
+        pid: 4242,
+        sceneUuid: "scene-child",
+      })
+    );
+  });
+
   it("replaces the old PID when the same game launches again", async () => {
     const service = await loadService();
 
