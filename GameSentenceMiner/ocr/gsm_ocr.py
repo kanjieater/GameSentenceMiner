@@ -74,6 +74,7 @@ from GameSentenceMiner.util.config.electron_config import (
     get_ocr_send_to_clipboard,
     get_ocr_scan_rate,
     get_ocr_wgc_capture_fps,
+    get_ocr_obs_capture_preprocess_mode,
     has_ocr_config_changed,
     reload_electron_config,
     get_ocr_change_detection_threshold,
@@ -4125,6 +4126,19 @@ def _capture_monitor_image() -> tuple[Image.Image | None, dict[str, Any] | None]
         return img, metadata
 
 
+def _resolve_obs_capture_preprocess_mode(current_ocr_config=None) -> str:
+    if current_ocr_config is None:
+        try:
+            current_ocr_config = get_ocr_config()
+        except Exception:
+            current_ocr_config = None
+
+    scene_mode = getattr(current_ocr_config, "obs_capture_preprocess", None)
+    if scene_mode is not None and str(scene_mode).strip():
+        return obs._normalize_ocr_preprocess_mode(preprocess_mode=scene_mode)
+    return get_ocr_obs_capture_preprocess_mode()
+
+
 def run_whole_window_ocr_once(source=TextSource.MANUAL) -> bool:
     logger.info("Running whole-window OCR...")
     capture_time = datetime.now()
@@ -4138,6 +4152,7 @@ def run_whole_window_ocr_once(source=TextSource.MANUAL) -> bool:
             img = obs.get_screenshot_PIL(
                 compression=90,
                 img_format="jpg",
+                preprocess_mode=_resolve_obs_capture_preprocess_mode(),
                 capture_fps=get_ocr_wgc_capture_fps(),
             )
             if img is not None:
@@ -4220,6 +4235,7 @@ def _run_configured_rectangles_ocr_once(*, is_secondary: bool) -> bool:
     img = obs.get_screenshot_PIL(
         compression=90,
         img_format="jpg",
+        preprocess_mode=_resolve_obs_capture_preprocess_mode(current_ocr_config),
         capture_fps=get_ocr_wgc_capture_fps(),
     )
     if img is None:
