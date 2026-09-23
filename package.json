@@ -23,7 +23,7 @@
     "test:ts:watch": "vitest --config vitest.config.ts",
     "provision:diagnose": "npm run build:main && node scripts/provision-diagnose.mjs",
     "provision:apply": "npm run build && node scripts/provision-apply.mjs",
-    "provision:e2e": "npm run build && node scripts/provision-e2e.mjs",
+    "provision:e2e": "node scripts/provision-e2e.mjs",
     "build:native": "python -m pip install --disable-pip-version-check --no-deps -e .",
     "app:dir": "npm run build:native && npm run build && npm run build:windows-helpers && npm run stage:overlay && electron-builder --dir",
     "sync:version": "node scripts/sync-version.mjs",
