@@ -90,6 +90,7 @@ async function getObsWindowOptions(dataDir) {
       break;
     } catch (error) {
       lastError = error;
+      await candidate.disconnect().catch(() => undefined);
     }
   }
   if (!obs) throw lastError ?? new Error("No OBS websocket configuration was found.");
