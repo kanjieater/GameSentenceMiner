@@ -111,17 +111,6 @@ function parseEncodedProvisioningToken(
       processId = payload.processId;
     }
 
-    if (
-      payload.launchKind !== undefined &&
-      payload.launchKind !== "emulator"
-    ) {
-      return {
-        kind: "invalid",
-        reason:
-          "Provisioning token launchKind must be "emulator" when supplied.",
-      };
-    }
-
     return {
       kind: "ensure-game",
       request: {
