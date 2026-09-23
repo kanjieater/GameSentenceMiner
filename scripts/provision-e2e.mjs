@@ -73,6 +73,12 @@ function isOcrProcessRunning() {
 }
 
 const before = diagnose();
+const beforeBinding = before.existing?.bindings?.find(
+  (binding) =>
+    binding.externalId === before.requested.externalId &&
+    binding.pending === false &&
+    Boolean(binding.sceneId)
+);
 if (before.result !== "safe-to-provision") {
   throw new Error(
     "Read-only preflight is not safe-to-provision:\n" +
@@ -127,13 +133,16 @@ while (Date.now() < deadline) {
   const noPersistentTitleRule =
     !processOwned ||
     (after.existing?.persistentWindowSceneRules?.length ?? 0) === 0;
+  const reusedExistingScene =
+    !beforeBinding || beforeBinding.sceneId === completeBinding?.sceneId;
 
   if (
     completeBinding &&
     hasScene &&
     autoOcrReady &&
     launchScoped &&
-    noPersistentTitleRule
+    noPersistentTitleRule &&
+    reusedExistingScene
   ) {
     restoreForeground(before.foreground?.hwnd);
 
@@ -165,7 +174,7 @@ while (Date.now() < deadline) {
       }
       ocrProcessRunning = isOcrProcessRunning();
 
-      if (switchedToBoundScene && ocrLogStarted && ocrProcessRunning) {
+      if (switchedToBoundScene && ocrProcessRunning) {
         console.log(
           JSON.stringify(
             {
@@ -184,6 +193,9 @@ while (Date.now() < deadline) {
                 persistentWindowSceneRules:
                   live.existing.persistentWindowSceneRules,
                 autoOcrReady: live.existing.autoOcrReady,
+                reusedExistingScene: beforeBinding
+                  ? beforeBinding.sceneId === completeBinding.sceneId
+                  : null,
               },
               runtime: {
                 currentProgramScene: live.obs.currentProgramScene,
