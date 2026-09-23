@@ -7,12 +7,16 @@ import {
   createForegroundGameCaptureTargetResolver,
   type GameProvisioningTargetResolverDependencies,
 } from "./game_provisioning_target_resolver.js";
+import {
+  getWindowsProcessRelationships,
+  LaunchProcessTree,
+  type ProcessRelationship,
+} from "./process_lineage.js";
 
 export interface GameProvisioningRetryOptions {
   attempts?: number;
   delayMs?: number;
   pidStrictAttempts?: number;
-  launchScopedExactPidAfterAttempts?: number;
 }
 
 export interface GameProvisioningRetryDependencies
@@ -22,6 +26,7 @@ export interface GameProvisioningRetryDependencies
     request: GameProvisioningRequest,
     resolveCaptureTarget: GameCaptureTargetResolver
   ) => Promise<GameProvisioningResult>;
+  getProcessRelationships?: () => Promise<ProcessRelationship[]>;
 }
 
 export async function ensureGameProvisionedWithRetry(
@@ -34,10 +39,6 @@ export async function ensureGameProvisionedWithRetry(
   const pidStrictAttempts = Math.max(
     0,
     Math.min(attempts, options.pidStrictAttempts ?? 8)
-  );
-  const launchScopedExactPidAfterAttempts = Math.max(
-    0,
-    options.launchScopedExactPidAfterAttempts ?? 4
   );
   const wait =
     dependencies.wait ??
@@ -56,15 +57,36 @@ export async function ensureGameProvisionedWithRetry(
     status: "target-not-ready",
     reason: "The game provisioning target is not ready yet.",
   };
+  const launchTree =
+    typeof request.processId === "number" && request.processId > 0
+      ? new LaunchProcessTree(request.processId)
+      : null;
+  const getProcessRelationships =
+    dependencies.getProcessRelationships ?? getWindowsProcessRelationships;
 
   for (let attempt = 0; attempt < attempts; attempt += 1) {
+    const foreground = dependencies.getForegroundSnapshot();
+    if (
+      launchTree &&
+      foreground &&
+      !launchTree.owns(foreground.pid)
+    ) {
+      try {
+        launchTree.observe(await getProcessRelationships());
+      } catch {
+        // Process ancestry is strong positive evidence when available, but a
+        // transient CIM/PowerShell failure should not abort the whole retry
+        // operation. The conservative fallback remains available later.
+      }
+    }
+
     const resolver = createForegroundGameCaptureTargetResolver(
       dependencies,
       {
         enforceProcessId: attempt < pidStrictAttempts,
-        allowLaunchScopedExactPid:
-          request.launchKind === "emulator" &&
-          attempt >= launchScopedExactPidAfterAttempts,
+        ...(launchTree
+          ? { isLaunchProcess: (pid: number) => launchTree.owns(pid) }
+          : {}),
       }
     );
 
