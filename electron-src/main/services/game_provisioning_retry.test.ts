@@ -330,9 +330,10 @@ describe("game provisioning whole-operation retry", () => {
 
     const ensureAttempt = vi.fn(
       async (
-        _request: GameProvisioningRequest,
+        attemptRequest: GameProvisioningRequest,
         resolver: GameCaptureTargetResolver
       ): Promise<GameProvisioningResult> => {
+        expect(attemptRequest.launchProcessIds).toEqual([53768]);
         const resolution = await resolver({
           displayName: "Realize - Panorama Luminary",
           processId: 53768,
@@ -367,6 +368,7 @@ describe("game provisioning whole-operation retry", () => {
             pid: 53768,
             parentPid: 1,
             executableName: "pcsx2-qt.exe",
+            windowTitle: "_REALIZE -Panorama Luminary-",
           },
         ],
         ensureAttempt,
