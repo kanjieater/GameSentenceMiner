@@ -1558,20 +1558,6 @@ function buildOBSLaunchArgs(baseArgs: string[], config: ElectronOBSStartupConfig
     return args;
 }
 
-async function isOBSBusyForSceneSwitcherMigration(): Promise<boolean> {
-    try {
-        await getOBSConnection();
-        const [recordStatus, streamStatus] = await Promise.all([
-            callOBS('GetRecordStatus'),
-            callOBS('GetStreamStatus'),
-        ]);
-        return recordStatus?.outputActive === true || streamStatus?.outputActive === true;
-    } catch {
-        // If an already-running OBS cannot be inspected, do not force it closed.
-        return true;
-    }
-}
-
 async function launchOBSFromElectronInternal(
     options: ElectronOBSProcessOptions = {}
 ): Promise<ElectronOBSProcessResult> {
