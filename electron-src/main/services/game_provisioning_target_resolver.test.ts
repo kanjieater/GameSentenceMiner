@@ -39,6 +39,7 @@ describe("game provisioning target resolver", () => {
       target: {
         title: windowOption.title,
         selection: windowOption,
+        durableSwitcherSafe: false,
         launchProcessId: 4242,
       },
     });
