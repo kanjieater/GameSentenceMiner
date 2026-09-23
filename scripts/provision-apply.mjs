@@ -97,6 +97,10 @@ const child = spawn(electronExe, [repoRoot, token], {
   detached: true,
   stdio: ["ignore", logFd, logFd],
   windowsHide: false,
+  env: {
+    ...process.env,
+    GSM_SOURCE_E2E_REUSE_EXISTING_OBS: "1",
+  },
 });
 fs.closeSync(logFd);
 child.unref();
