@@ -3587,8 +3587,34 @@ export async function refreshSceneCaptureSource(sceneUuid: string): Promise<bool
         const response = await callOBS('GetSceneItemList', {
             sceneUuid: trimmedSceneUuid,
         });
-        const captureItem = chooseSwitchableCaptureItem(response?.sceneItems ?? []);
-        if (!captureItem || !isSwitchableCaptureMode(captureItem.inputKind)) {
+        const sceneItems = Array.isArray(response?.sceneItems)
+            ? response.sceneItems
+            : [];
+        const windowCaptures = sceneItems.filter(
+            (item: any) => item?.inputKind === 'window_capture'
+        );
+        if (windowCaptures.length === 0) {
+            return false;
+        }
+
+        const enabledWindowCaptures = windowCaptures.filter(
+            (item: any) => item.sceneItemEnabled !== false
+        );
+        const candidates =
+            enabledWindowCaptures.length > 0
+                ? enabledWindowCaptures
+                : windowCaptures;
+
+        const namedCandidates = candidates.filter((item: any) =>
+            String(item.sourceName ?? '').endsWith(' - Window Capture')
+        );
+        const captureItem =
+            namedCandidates.length === 1
+                ? namedCandidates[0]
+                : candidates.length === 1
+                    ? candidates[0]
+                    : null;
+        if (!captureItem) {
             return false;
         }
 
