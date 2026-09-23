@@ -6,6 +6,7 @@ const execFileAsync = promisify(execFile);
 export interface ProcessRelationship {
   pid: number;
   parentPid: number;
+  executableName?: string;
 }
 
 function normalizeProcessRelationship(value: unknown): ProcessRelationship | null {
@@ -17,13 +18,20 @@ function normalizeProcessRelationship(value: unknown): ProcessRelationship | nul
     ParentProcessId?: unknown;
     pid?: unknown;
     parentPid?: unknown;
+    Name?: unknown;
+    executableName?: unknown;
   };
   const pid = Number(item.ProcessId ?? item.pid);
   const parentPid = Number(item.ParentProcessId ?? item.parentPid);
   if (!Number.isInteger(pid) || pid <= 0 || !Number.isInteger(parentPid) || parentPid < 0) {
     return null;
   }
-  return { pid, parentPid };
+  const executableNameRaw = item.Name ?? item.executableName;
+  const executableName =
+    typeof executableNameRaw === "string" && executableNameRaw.trim()
+      ? executableNameRaw.trim()
+      : undefined;
+  return { pid, parentPid, ...(executableName ? { executableName } : {}) };
 }
 
 export function normalizeProcessRelationships(value: unknown): ProcessRelationship[] {
@@ -47,7 +55,7 @@ export async function getWindowsProcessRelationships(): Promise<ProcessRelations
 
   const script = [
     "$OutputEncoding=[Console]::OutputEncoding=[Text.UTF8Encoding]::new($false)",
-    "Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId | ConvertTo-Json -Compress",
+    "Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId,Name | ConvertTo-Json -Compress",
   ].join("; ");
 
   const { stdout } = await execFileAsync(
@@ -74,6 +82,7 @@ export async function getWindowsProcessRelationships(): Promise<ProcessRelations
 export class LaunchProcessTree {
   readonly rootPid: number;
   private readonly knownPids = new Set<number>();
+  private readonly executableNames = new Map<number, string>();
 
   constructor(rootPid: number) {
     if (!Number.isInteger(rootPid) || rootPid <= 0) {
@@ -96,6 +105,15 @@ export class LaunchProcessTree {
           this.knownPids.add(relationship.pid);
           changed = true;
         }
+        if (
+          this.knownPids.has(relationship.pid) &&
+          relationship.executableName
+        ) {
+          this.executableNames.set(
+            relationship.pid,
+            relationship.executableName
+          );
+        }
       }
     }
   }
@@ -106,6 +124,15 @@ export class LaunchProcessTree {
 
   getKnownPids(): number[] {
     return [...this.knownPids].sort((left, right) => left - right);
+  }
+
+  getKnownProcesses(): Array<{ pid: number; executableName?: string }> {
+    return this.getKnownPids().map((pid) => ({
+      pid,
+      ...(this.executableNames.get(pid)
+        ? { executableName: this.executableNames.get(pid) }
+        : {}),
+    }));
   }
 
   hasLivingProcess(relationships: Iterable<ProcessRelationship>): boolean {
