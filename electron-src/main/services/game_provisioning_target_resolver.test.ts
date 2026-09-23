@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { ForegroundWindowSnapshot } from "../../shared/window_scene_switcher.js";
-import type { ObsWindowOption } from "../ui/obs-capture.js";
+import { mergeObsWindowItems, type ObsWindowOption } from "../ui/obs-capture.js";
 import {
   createForegroundGameCaptureTargetResolver,
   resolveForegroundCaptureTarget,
@@ -38,6 +38,29 @@ describe("game provisioning target resolver", () => {
       status: "resolved",
       target: { title: windowOption.title, selection: windowOption },
     });
+  });
+
+  it("preserves a Japanese PCSX2 window through production OBS merging and refuses an untranslated Playnite name", () => {
+    const title = "ドラゴンシャドウスペル";
+    const value = "ドラゴンシャドウスペル:Qt682QWindowIcon:pcsx2-qt.exe";
+    const [option] = mergeObsWindowItems([
+      { itemName: "[pcsx2-qt.exe]: " + title, itemValue: value, captureMode: "window_capture" },
+      { itemName: "[pcsx2-qt.exe]: " + title, itemValue: value, captureMode: "game_capture" },
+    ]);
+    const result = resolveForegroundCaptureTarget(
+      { displayName: "Dragon Shadow Spell", processId: 15300, externalId: "playnite:c1bd7a8f-7830-40ce-a908-fac7e4fef840" },
+      { hwnd: "1641430", pid: 15300, title, executableName: "pcsx2-qt.exe", capturedAt: 1, sequence: 1 },
+      [{ ...option, suggestedSceneName: title }]
+    );
+
+    expect(option).toMatchObject({
+      title,
+      captureValues: { window_capture: value, game_capture: value },
+    });
+    expect(result).toEqual(expect.objectContaining({
+      status: "not-ready",
+      reason: expect.stringContaining("does not identify the requested game yet"),
+    }));
   });
 
   it("refuses a matching Playnite PID when the foreground target is still a wrapper", () => {
