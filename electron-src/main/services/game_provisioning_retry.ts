@@ -18,6 +18,12 @@ export interface GameProvisioningRetryOptions {
   delayMs?: number;
   pidStrictAttempts?: number;
   launchOwnershipDelayAttempts?: number;
+  /**
+   * For an already-bound Playnite launch, keep sampling the launch tree for a
+   * short bounded window before returning so transient multi-hop descendants
+   * are not lost while the root is still foreground.
+   */
+  boundLaunchObservationAttempts?: number;
 }
 
 export interface GameProvisioningRetryDependencies
@@ -44,6 +50,10 @@ export async function ensureGameProvisionedWithRetry(
   const launchOwnershipDelayAttempts = Math.max(
     0,
     options.launchOwnershipDelayAttempts ?? 4
+  );
+  const boundLaunchObservationAttempts = Math.max(
+    1,
+    Math.min(attempts, options.boundLaunchObservationAttempts ?? 8)
   );
   const wait =
     dependencies.wait ??
@@ -72,10 +82,7 @@ export async function ensureGameProvisionedWithRetry(
 
   for (let attempt = 0; attempt < attempts; attempt += 1) {
     const foreground = dependencies.getForegroundSnapshot();
-    if (
-      launchTree &&
-      (!foreground || !launchTree.owns(foreground.pid))
-    ) {
+    if (launchTree) {
       try {
         latestProcessSnapshot = await getProcessRelationships();
         launchTree.observe(latestProcessSnapshot);
@@ -116,7 +123,14 @@ export async function ensureGameProvisionedWithRetry(
       : request;
 
     lastResult = await ensureAttempt(attemptRequest, resolver);
-    if (lastResult.status !== "target-not-ready") {
+    if (lastResult.status === "already-configured") {
+      const shouldObserveBoundLaunch =
+        Boolean(launchTree && request.externalId?.trim()) &&
+        attempt + 1 < boundLaunchObservationAttempts;
+      if (!shouldObserveBoundLaunch) {
+        return lastResult;
+      }
+    } else if (lastResult.status !== "target-not-ready") {
       return lastResult;
     }
 
