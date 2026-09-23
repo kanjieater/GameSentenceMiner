@@ -2,7 +2,7 @@
 /**
  * Read-only live provisioning preflight.  This intentionally does not create
  * OBS probe inputs: it only queries the two existing Setup Capture helpers.
- * Run with: npm run provision:diagnose -- --name "Game" --external-id "playnite:<guid>" [--pid 123] [--launch-kind emulator]
+ * Run with: npm run provision:diagnose -- --name "Game" --external-id "playnite:<guid>" [--pid 123]
  */
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
@@ -24,13 +24,9 @@ function value(flag, required = true) {
 const displayName = value("--name");
 const externalId = value("--external-id");
 const pidValue = value("--pid", false);
-const launchKindValue = value("--launch-kind", false);
 const processId = pidValue ? Number(pidValue) : undefined;
 if (pidValue && (!Number.isInteger(processId) || processId <= 0)) {
   throw new Error("--pid must be a positive integer.");
-}
-if (launchKindValue !== undefined && launchKindValue !== "emulator") {
-  throw new Error('--launch-kind must be "emulator" when supplied.');
 }
 
 function getForegroundSnapshot() {
@@ -107,8 +103,10 @@ async function getObsWindowOptions() {
 
 const resolverPath = pathToFileURL(path.join(repoRoot, "dist", "main", "services", "game_provisioning_target_resolver.js")).href;
 const capturePath = pathToFileURL(path.join(repoRoot, "dist", "main", "ui", "obs-capture.js")).href;
+const lineagePath = pathToFileURL(path.join(repoRoot, "dist", "main", "services", "process_lineage.js")).href;
 const { resolveForegroundCaptureTarget } = await import(resolverPath);
 const { mergeObsWindowItems } = await import(capturePath);
+const { LaunchProcessTree, getWindowsProcessRelationships } = await import(lineagePath);
 const foreground = getForegroundSnapshot();
 let obsResult;
 try {
@@ -120,21 +118,29 @@ const request = {
   displayName,
   externalId,
   ...(processId ? { processId } : {}),
-  ...(launchKindValue ? { launchKind: launchKindValue } : {}),
   defaultMode: "ocr",
 };
-// This is the resolver configuration used after PR #10's exact-PID stability
-// gate. It still enforces PID equality, so launcher→child cases remain refused.
+let launchTree = null;
+let processRelationships = [];
+if (processId) {
+  launchTree = new LaunchProcessTree(processId);
+  try {
+    processRelationships = await getWindowsProcessRelationships();
+    launchTree.observe(processRelationships);
+  } catch {
+    processRelationships = [];
+  }
+}
 const resolution = resolveForegroundCaptureTarget(request, foreground, obsResult.options, {
   enforceProcessId: true,
-  allowLaunchScopedExactPid: true,
+  ...(launchTree ? { isLaunchProcess: (pid) => launchTree.owns(pid) } : {}),
 });
 const planned = resolution.status === "resolved" ? {
   sceneName: request.displayName,
   externalIdBinding: request.externalId,
   captureTarget: resolution.target,
   launchPidAssociation: resolution.target.durableSwitcherSafe === false
-    ? { pid: request.processId, sceneName: request.displayName }
+    ? { rootPid: request.processId, foregroundPid: resolution.target.launchProcessId, sceneName: request.displayName }
     : null,
   persistentWindowSceneRule: resolution.target.durableSwitcherSafe !== false,
 } : null;
@@ -147,6 +153,12 @@ console.log(JSON.stringify({
   mode: "read-only",
   requested: request,
   foreground,
+  lineage: processId ? {
+    rootPid: processId,
+    knownPids: launchTree?.getKnownPids() ?? [processId],
+    foregroundOwned: launchTree?.owns(foreground.pid) ?? false,
+    sampledRelationships: processRelationships.length,
+  } : null,
   obs: { candidateCount: obsResult.options.length, candidates: obsResult.options, errors: obsResult.errors },
   resolver: resolution,
   planned,
