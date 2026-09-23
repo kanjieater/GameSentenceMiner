@@ -210,6 +210,7 @@ describe("game provisioning core", () => {
 
   it("preserves an existing user-owned Game Automation profile unchanged", async () => {
     const existingProfile = autoOcrProfile({
+      ocrPreset: undefined,
       textHookMode: "textractor",
       ocrMode: "none",
       launchOverlay: true,
