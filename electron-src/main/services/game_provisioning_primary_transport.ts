@@ -10,6 +10,7 @@ export interface GameProvisioningPrimaryTransport {
   version: 1;
   pid: number;
   executablePath: string;
+  workingDirectory: string;
   argumentPrefix: string[];
 }
 
@@ -20,7 +21,8 @@ function encode(value: string): string {
 export function buildGameProvisioningPrimaryTransport(
   pid: number,
   executablePath: string,
-  argv: string[]
+  argv: string[],
+  workingDirectory: string = process.cwd()
 ): GameProvisioningPrimaryTransport {
   if (!Number.isInteger(pid) || pid <= 0) {
     throw new Error("Primary transport PID must be a positive integer.");
@@ -28,11 +30,15 @@ export function buildGameProvisioningPrimaryTransport(
   if (!executablePath.trim()) {
     throw new Error("Primary transport executable path is required.");
   }
+  if (!workingDirectory.trim()) {
+    throw new Error("Primary transport working directory is required.");
+  }
 
   return {
     version: 1,
     pid,
     executablePath,
+    workingDirectory,
     argumentPrefix: argv
       .slice(1)
       .filter((arg) => !arg.startsWith(GAME_PROVISIONING_TOKEN_PREFIX)),
@@ -56,6 +62,7 @@ export function serializeGameProvisioningPrimaryTransport(
     "version=1",
     `pid=${transport.pid}`,
     `executable=${encode(transport.executablePath)}`,
+    `workdir=${encode(transport.workingDirectory)}`,
     `argc=${transport.argumentPrefix.length}`,
     ...transport.argumentPrefix.map(
       (arg, index) => `arg${index}=${encode(arg)}`
