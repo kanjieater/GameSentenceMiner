@@ -265,6 +265,18 @@ describe("game provisioning target resolver", () => {
               windowTitle: "_REALIZE -Panorama Luminary-",
             },
           ],
+          processSnapshot: [
+            {
+              pid: 53768,
+              executableName: "pcsx2-qt.exe",
+              windowTitle: "_REALIZE -Panorama Luminary-",
+            },
+            {
+              pid: 8888,
+              executableName: "WindowsTerminal.exe",
+              windowTitle: "π - ke",
+            },
+          ],
         }
       )
     ).toEqual({
@@ -316,6 +328,60 @@ describe("game provisioning target resolver", () => {
     ).toBe("not-ready");
   });
 
+  it("fails closed when another live emulator process shares the same window identity", () => {
+    const terminalForeground: ForegroundWindowSnapshot = {
+      hwnd: "999",
+      pid: 8888,
+      title: "π - ke",
+      executableName: "WindowsTerminal.exe",
+      capturedAt: 2,
+      sequence: 2,
+    };
+    const realizeOption: ObsWindowOption = {
+      title: "_REALIZE -Panorama Luminary-",
+      suggestedSceneName: "_REALIZE -Panorama Luminary-",
+      value: "_REALIZE -Panorama Luminary-:Qt682QWindowIcon:pcsx2-qt.exe",
+      targetKind: "window",
+      captureValues: {
+        window_capture:
+          "_REALIZE -Panorama Luminary-:Qt682QWindowIcon:pcsx2-qt.exe",
+      },
+    };
+
+    expect(
+      resolveForegroundCaptureTarget(
+        {
+          displayName: "Realize - Panorama Luminary",
+          processId: 53768,
+          externalId: "playnite:realize",
+        },
+        terminalForeground,
+        [realizeOption],
+        {
+          launchProcesses: [
+            {
+              pid: 53768,
+              executableName: "pcsx2-qt.exe",
+              windowTitle: "_REALIZE -Panorama Luminary-",
+            },
+          ],
+          processSnapshot: [
+            {
+              pid: 53768,
+              executableName: "pcsx2-qt.exe",
+              windowTitle: "_REALIZE -Panorama Luminary-",
+            },
+            {
+              pid: 60000,
+              executableName: "pcsx2-qt.exe",
+              windowTitle: "_REALIZE -Panorama Luminary-",
+            },
+          ],
+        }
+      ).status
+    ).toBe("not-ready");
+  });
+
   it("fails closed when multiple OBS windows share a launch-owned executable", () => {
     const terminalForeground: ForegroundWindowSnapshot = {
       hwnd: "999",
@@ -355,7 +421,18 @@ describe("game provisioning target resolver", () => {
         [realizeOption, secondPcsx2Option],
         {
           launchProcesses: [
-            { pid: 53768, executableName: "pcsx2-qt.exe" },
+            {
+              pid: 53768,
+              executableName: "pcsx2-qt.exe",
+              windowTitle: "_REALIZE -Panorama Luminary-",
+            },
+          ],
+          processSnapshot: [
+            {
+              pid: 53768,
+              executableName: "pcsx2-qt.exe",
+              windowTitle: "_REALIZE -Panorama Luminary-",
+            },
           ],
         }
       )
