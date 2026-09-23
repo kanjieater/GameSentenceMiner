@@ -32,6 +32,7 @@ def test_summarize_timings_uses_at_least_one_sample_for_one_percent_buckets():
     assert round(summary["low_1_percent_fps"], 6) == round(1 / 0.5, 6)
     assert round(summary["high_1_percent_fps"], 6) == round(1 / 0.1, 6)
 
+
 def test_apply_preprocess_variant_box_1080_downsamples_with_expected_aspect_ratio():
     image = Image.new("RGB", (1920, 1200), "white")
 
