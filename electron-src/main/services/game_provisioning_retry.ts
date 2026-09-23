@@ -17,6 +17,7 @@ export interface GameProvisioningRetryOptions {
   attempts?: number;
   delayMs?: number;
   pidStrictAttempts?: number;
+  launchOwnershipDelayAttempts?: number;
 }
 
 export interface GameProvisioningRetryDependencies
@@ -39,6 +40,10 @@ export async function ensureGameProvisionedWithRetry(
   const pidStrictAttempts = Math.max(
     0,
     Math.min(attempts, options.pidStrictAttempts ?? 8)
+  );
+  const launchOwnershipDelayAttempts = Math.max(
+    0,
+    options.launchOwnershipDelayAttempts ?? 4
   );
   const wait =
     dependencies.wait ??
@@ -85,7 +90,11 @@ export async function ensureGameProvisionedWithRetry(
       {
         enforceProcessId: attempt < pidStrictAttempts,
         ...(launchTree
-          ? { isLaunchProcess: (pid: number) => launchTree.owns(pid) }
+          ? {
+              isLaunchProcess: (pid: number) =>
+                attempt >= launchOwnershipDelayAttempts &&
+                launchTree.owns(pid),
+            }
           : {}),
       }
     );
