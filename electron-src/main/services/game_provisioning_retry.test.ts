@@ -189,6 +189,63 @@ describe("game provisioning whole-operation retry", () => {
     expect(getWindowOptions).toHaveBeenCalledTimes(2);
   });
 
+  it("waits before allowing launch-scoped exact-PID identity", async () => {
+    const genericForeground: ForegroundWindowSnapshot = {
+      ...foreground,
+      title: "RetroArch SwanStation 1.0.0 4d309c0",
+      executableName: "retroarch.exe",
+    };
+    const genericOption: ObsWindowOption = {
+      title: genericForeground.title,
+      suggestedSceneName: genericForeground.title,
+      value: "RetroArch SwanStation 1.0.0 4d309c0:RetroArch:retroarch.exe",
+      targetKind: "window",
+      captureValues: {
+        window_capture:
+          "RetroArch SwanStation 1.0.0 4d309c0:RetroArch:retroarch.exe",
+        game_capture:
+          "RetroArch SwanStation 1.0.0 4d309c0:RetroArch:retroarch.exe",
+      },
+    };
+    const resolutions: string[] = [];
+    const ensureAttempt = vi.fn(
+      async (
+        _request: GameProvisioningRequest,
+        resolver: GameCaptureTargetResolver
+      ): Promise<GameProvisioningResult> => {
+        const resolution = await resolver({
+          displayName: "Arc the Lad II",
+          processId: 4242,
+        });
+        resolutions.push(resolution.status);
+        if (resolution.status === "resolved") {
+          expect(resolution.target.durableSwitcherSafe).toBe(false);
+          return success;
+        }
+        return { status: "target-not-ready", reason: resolution.reason };
+      }
+    );
+
+    const result = await ensureGameProvisionedWithRetry(
+      { displayName: "Arc the Lad II", processId: 4242 },
+      {
+        isSupported: () => true,
+        getForegroundSnapshot: () => genericForeground,
+        getWindowOptions: async () => [genericOption],
+        ensureAttempt,
+        wait: async () => undefined,
+      },
+      {
+        attempts: 2,
+        delayMs: 1,
+        launchScopedExactPidAfterAttempts: 1,
+      }
+    );
+
+    expect(result.status).toBe("already-configured");
+    expect(resolutions).toEqual(["not-ready", "resolved"]);
+  });
+
   it("uses PID strictly first, then safely falls back after launcher handoff", async () => {
     const ensureAttempt = vi.fn(
       async (
