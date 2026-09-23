@@ -73,6 +73,6 @@ def test_profile_preset_absent_preserves_existing_advanced_ocr(monkeypatch):
     assert electron_config.get_ocr_optimize_second_scan() is False
     assert electron_config.get_ocr_text_appears_instantly() is True
     assert electron_config.get_ocr_ocr1() == electron_config._resolve_ocr_engine("oneocr")
-    assert electron_config.get_ocr_ocr2() == "oneocr"
+    assert electron_config.get_ocr_ocr2() == electron_config._resolve_ocr_engine("oneocr")
     assert electron_config.get_ocr_scan_rate() == 1.25
     assert electron_config.get_ocr_language() == "en"
