@@ -1484,6 +1484,41 @@ async function processImageIsObs(pid: number): Promise<boolean> {
     }
 }
 
+async function getAnyRunningOBSPid(): Promise<number | null> {
+    const managedPid = await getRunningManagedOBSPid();
+    if (managedPid) {
+        return managedPid;
+    }
+
+    try {
+        if (isWindows()) {
+            const { stdout } = await execFileAsync('tasklist', [
+                '/NH',
+                '/FO',
+                'CSV',
+                '/FI',
+                'IMAGENAME eq obs64.exe',
+            ]);
+            const match = String(stdout ?? '').match(/"obs(?:64)?\.exe","(\d+)"/i);
+            return match ? Number.parseInt(match[1], 10) : null;
+        }
+
+        const { stdout } = await execFileAsync('ps', ['-A', '-o', 'pid=,comm=']);
+        for (const line of String(stdout ?? '').split(/\r?\n/)) {
+            const match = line.trim().match(/^(\d+)\s+(.+)$/);
+            if (match && /(^|\/)obs(?:$|\s)/i.test(match[2].trim())) {
+                return Number.parseInt(match[1], 10);
+            }
+        }
+    } catch (error) {
+        // Process discovery is a safety guard. If it fails, the managed PID
+        // checks still apply; log so a duplicate-launch diagnosis has evidence.
+        logObsError('Failed to discover an already-running OBS process:', error);
+    }
+
+    return null;
+}
+
 async function getRunningManagedOBSPid(): Promise<number | null> {
     const ownedPid = getOwnedOBSProcessPid();
     if (ownedPid) {
@@ -1551,19 +1586,22 @@ async function launchOBSFromElectronInternal(
         return { status: 'skipped' };
     }
 
-    const existingPid = await getRunningManagedOBSPid();
+    const managedPid = await getRunningManagedOBSPid();
+    const existingPid = managedPid ?? await getAnyRunningOBSPid();
     const switcherMigrationPending =
         await hasPendingLegacyWindowSceneSwitcherMigration(SCENE_CONFIG_PATH);
     if (existingPid) {
-        if (!options.forceRestart && !switcherMigrationPending) {
+        // Automatic startup must never close/relaunch an OBS instance that is
+        // already open. A pending migration can wait until the next clean
+        // startup. Only an explicit forceRestart may restart an OBS process
+        // that this GSM instance actually owns/manages.
+        if (!options.forceRestart || !managedPid) {
             electronOBSLaunchStatus = 'already-running';
-            return { status: 'already-running', pid: existingPid };
-        }
-        if (switcherMigrationPending && await isOBSBusyForSceneSwitcherMigration()) {
-            electronOBSLaunchStatus = 'already-running';
-            console.warn(
-                '[SceneSwitcher] OBS migration deferred while OBS is recording, streaming, or unavailable.'
-            );
+            if (switcherMigrationPending) {
+                console.warn(
+                    '[SceneSwitcher] OBS migration deferred because OBS is already running.'
+                );
+            }
             return { status: 'already-running', pid: existingPid };
         }
         await closeOBSFromElectron({ ignoreCloseConfig: true, reason: options.reason });
@@ -1641,7 +1679,7 @@ export function launchOBSFromElectron(
                 electronOBSLaunchStatus === 'launched' ||
                 electronOBSLaunchStatus === 'already-running'
             ) {
-                const runningPid = await getRunningManagedOBSPid();
+                const runningPid = await getAnyRunningOBSPid();
                 if (runningPid) {
                     return { status: 'already-running', pid: runningPid } as const;
                 }
