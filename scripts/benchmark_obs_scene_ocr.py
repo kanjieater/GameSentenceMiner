@@ -21,6 +21,43 @@ connect_to_obs_sync = None
 disconnect_from_obs = None
 get_ocr_ocr1 = None
 
+BENCHMARK_PREPROCESS_MODES = (
+    "none",
+    "box_1080",
+    "grayscale",
+    "autocontrast",
+    "light_sharpen",
+    "box_1080_autocontrast",
+    "crt_scanlines",
+)
+
+
+def apply_preprocess_variant(image, mode: str):
+    from PIL import Image, ImageFilter, ImageOps
+
+    normalized = str(mode or "none").strip().lower()
+    if normalized == "none":
+        return image
+
+    def box_1080(source):
+        if source.height <= 1080:
+            return source
+        target_height = 1080
+        target_width = max(1, round(source.width * (target_height / source.height)))
+        return source.resize((target_width, target_height), Image.Resampling.BOX)
+
+    if normalized == "box_1080":
+        return box_1080(image)
+    if normalized == "grayscale":
+        return ImageOps.grayscale(image)
+    if normalized == "autocontrast":
+        return ImageOps.autocontrast(image, cutoff=1)
+    if normalized == "light_sharpen":
+        return image.filter(ImageFilter.UnsharpMask(radius=1.0, percent=120, threshold=2))
+    if normalized in {"box_1080_autocontrast", "crt_scanlines"}:
+        return ImageOps.autocontrast(box_1080(image), cutoff=1)
+    raise ValueError(f"Unknown preprocess mode: {mode}")
+
 
 def ensure_gsm_imports() -> None:
     global run, obs, connect_to_obs_sync, disconnect_from_obs, get_ocr_ocr1
@@ -208,6 +245,12 @@ def build_argument_parser() -> argparse.ArgumentParser:
         help="OBS screenshot format. Default: jpg.",
     )
     parser.add_argument(
+        "--preprocess-mode",
+        default="none",
+        choices=BENCHMARK_PREPROCESS_MODES,
+        help="OCR-only image transform to benchmark. Default: none.",
+    )
+    parser.add_argument(
         "--recapture-each-run",
         action="store_true",
         help="Capture a fresh OBS screenshot for every timed run instead of reusing one still image.",
@@ -243,12 +286,14 @@ def main() -> int:
         compression=args.compression,
         img_format=args.img_format,
     )
+    base_image = apply_preprocess_variant(base_image, args.preprocess_mode)
 
     print(f"Python executable: {sys.executable}")
     print(f"Engine: {engine_instance.name} ({engine_instance.readable_name})")
     print(f"Scene: {scene_name or '<unknown>'}")
     print(f"Source: {source_name or '<auto>'}")
     print(f"Image size: {base_image.width}x{base_image.height}")
+    print(f"OCR preprocess: {args.preprocess_mode}")
     print(
         "Capture mode: "
         + ("fresh OBS screenshot every iteration" if args.recapture_each_run else "single OBS screenshot reused")
@@ -261,7 +306,10 @@ def main() -> int:
     warmup_failures = 0
     for _ in range(args.warmup):
         image = (
-            capture_obs_image(compression=args.compression, img_format=args.img_format)[2]
+            apply_preprocess_variant(
+                capture_obs_image(compression=args.compression, img_format=args.img_format)[2],
+                args.preprocess_mode,
+            )
             if args.recapture_each_run
             else base_image
         )
@@ -282,7 +330,10 @@ def main() -> int:
 
     for iteration_index in range(args.iterations):
         image = (
-            capture_obs_image(compression=args.compression, img_format=args.img_format)[2]
+            apply_preprocess_variant(
+                capture_obs_image(compression=args.compression, img_format=args.img_format)[2],
+                args.preprocess_mode,
+            )
             if args.recapture_each_run
             else base_image
         )
