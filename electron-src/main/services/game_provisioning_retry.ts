@@ -12,6 +12,7 @@ export interface GameProvisioningRetryOptions {
   attempts?: number;
   delayMs?: number;
   pidStrictAttempts?: number;
+  launchScopedExactPidAfterAttempts?: number;
 }
 
 export interface GameProvisioningRetryDependencies
@@ -31,6 +32,13 @@ export async function ensureGameProvisionedWithRetry(
     0,
     Math.min(attempts, options.pidStrictAttempts ?? 8)
   );
+  const launchScopedExactPidAfterAttempts = Math.max(
+    0,
+    Math.min(
+      attempts - 1,
+      options.launchScopedExactPidAfterAttempts ?? 4
+    )
+  );
   const wait =
     dependencies.wait ??
     ((milliseconds: number) =>
@@ -45,7 +53,11 @@ export async function ensureGameProvisionedWithRetry(
   for (let attempt = 0; attempt < attempts; attempt += 1) {
     const resolver = createForegroundGameCaptureTargetResolver(
       dependencies,
-      { enforceProcessId: attempt < pidStrictAttempts }
+      {
+        enforceProcessId: attempt < pidStrictAttempts,
+        allowLaunchScopedExactPid:
+          attempt >= launchScopedExactPidAfterAttempts,
+      }
     );
 
     lastResult = await ensureAttempt(request, resolver);
