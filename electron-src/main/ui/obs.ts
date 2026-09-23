@@ -1540,6 +1540,11 @@ async function isOBSBusyForSceneSwitcherMigration(): Promise<boolean> {
 async function launchOBSFromElectronInternal(
     options: ElectronOBSProcessOptions = {}
 ): Promise<ElectronOBSProcessResult> {
+    if (process.env.GSM_SOURCE_E2E_REUSE_EXISTING_OBS === '1') {
+        electronOBSLaunchStatus = 'skipped';
+        return { status: 'skipped' };
+    }
+
     const config = getElectronOBSStartupConfig();
     if (!config.openObs && !options.ignoreOpenConfig) {
         electronOBSLaunchStatus = 'skipped';
