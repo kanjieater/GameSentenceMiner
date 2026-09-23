@@ -564,7 +564,11 @@ describe("GSM game provisioning runtime binding", () => {
     const { ensureGameProvisionedWithGsm } = await loadRuntime();
 
     const result = await ensureGameProvisionedWithGsm(
-      { ...externalRequest, processId: 54321 },
+      {
+        ...externalRequest,
+        processId: 54321,
+        launchProcessIds: [54321, 60000, 60001],
+      },
       resolver
     );
 
@@ -579,7 +583,7 @@ describe("GSM game provisioning runtime binding", () => {
         sceneUuid: scene.id,
         sceneName: scene.name,
       },
-      expect.any(Set)
+      new Set([54321, 60000, 60001])
     );
   });
 
