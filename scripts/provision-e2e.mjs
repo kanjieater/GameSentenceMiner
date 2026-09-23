@@ -22,6 +22,7 @@ function runNode(script, forwardedArgs) {
     {
       encoding: "utf8",
       stdio: ["ignore", "pipe", "inherit"],
+      timeout: 15_000,
     }
   ).trim();
 }
@@ -47,7 +48,7 @@ public static class FocusRestore {
 }
 '@; [void][FocusRestore]::SetForegroundWindow([IntPtr]${String(hwnd)})`,
       ],
-      { stdio: "ignore" }
+      { stdio: "ignore", timeout: 3_000, windowsHide: true }
     );
   } catch {
     // Best-effort only. The final active-scene/OCR checks still fail closed.
@@ -64,7 +65,7 @@ function isOcrProcessRunning() {
         "-Command",
         "(Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -match 'GameSentenceMiner\\.ocr\\.gsm_ocr' } | Select-Object -First 1 -ExpandProperty ProcessId)",
       ],
-      { encoding: "utf8" }
+      { encoding: "utf8", timeout: 5_000, windowsHide: true }
     ).trim();
     return /^\d+$/.test(stdout);
   } catch {
