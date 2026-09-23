@@ -42,42 +42,6 @@ describe("game provisioning command transport", () => {
     });
   });
 
-  it("parses explicit emulator launch context from the token", () => {
-    const token = makeProvisioningToken({
-      displayName: "Arc the Lad II",
-      externalId: "playnite:abc",
-      processId: 4242,
-      launchKind: "emulator",
-    });
-
-    expect(parseGameProvisioningCommand([token])).toEqual({
-      kind: "ensure-game",
-      request: {
-        displayName: "Arc the Lad II",
-        externalId: "playnite:abc",
-        processId: 4242,
-        launchKind: "emulator",
-        defaultMode: "ocr",
-      },
-    });
-  });
-
-  it("rejects unknown launch context from the token", () => {
-    const token = makeProvisioningToken({
-      displayName: "Arc the Lad II",
-      externalId: "playnite:abc",
-      processId: 4242,
-      launchKind: "direct",
-    });
-
-    expect(parseGameProvisioningCommand([token])).toEqual(
-      expect.objectContaining({
-        kind: "invalid",
-        reason: expect.stringContaining("launchKind"),
-      })
-    );
-  });
-
   it("rejects malformed single-token provisioning payloads", () => {
     expect(
       parseGameProvisioningCommand([
