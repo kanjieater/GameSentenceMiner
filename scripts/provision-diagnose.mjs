@@ -111,6 +111,12 @@ async function getObsWindowOptions() {
             name: scene.sceneName ?? "",
           }))
         : [],
+      currentProgramScene: sceneInfo
+        ? {
+            id: sceneInfo.currentProgramSceneUuid ?? "",
+            name: sceneInfo.currentProgramSceneName ?? "",
+          }
+        : null,
     };
   } finally {
     await obs.disconnect();
@@ -133,6 +139,7 @@ try {
     errors: [error instanceof Error ? error.message : String(error)],
     activeCollection: null,
     scenes: [],
+    currentProgramScene: null,
   };
 }
 const request = {
@@ -211,6 +218,7 @@ console.log(JSON.stringify({
     activeCollection: obsResult.activeCollection,
     sceneCount: obsResult.scenes.length,
     scenes: obsResult.scenes,
+    currentProgramScene: obsResult.currentProgramScene,
     candidateCount: obsResult.options.length,
     candidates: obsResult.options,
     errors: obsResult.errors,
