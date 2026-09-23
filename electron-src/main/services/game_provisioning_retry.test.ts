@@ -227,7 +227,11 @@ describe("game provisioning whole-operation retry", () => {
     );
 
     const result = await ensureGameProvisionedWithRetry(
-      { displayName: "Arc the Lad II", processId: 4242 },
+      {
+        displayName: "Arc the Lad II",
+        processId: 4242,
+        launchKind: "emulator",
+      },
       {
         isSupported: () => true,
         getForegroundSnapshot: () => genericForeground,
@@ -244,6 +248,56 @@ describe("game provisioning whole-operation retry", () => {
 
     expect(result.status).toBe("already-configured");
     expect(resolutions).toEqual(["not-ready", "resolved"]);
+  });
+
+  it("does not enable launch-scoped exact-PID identity without emulator context", async () => {
+    const genericForeground: ForegroundWindowSnapshot = {
+      ...foreground,
+      title: "Generic Launcher",
+      executableName: "launcher.exe",
+    };
+    const genericOption: ObsWindowOption = {
+      title: "Generic Launcher",
+      suggestedSceneName: "Generic Launcher",
+      value: "Generic Launcher:Launcher:launcher.exe",
+      targetKind: "window",
+      captureValues: {
+        window_capture: "Generic Launcher:Launcher:launcher.exe",
+      },
+    };
+    const ensureAttempt = vi.fn(
+      async (
+        _request: GameProvisioningRequest,
+        resolver: GameCaptureTargetResolver
+      ): Promise<GameProvisioningResult> => {
+        const resolution = await resolver({
+          displayName: "Arc the Lad II",
+          processId: 4242,
+        });
+        return resolution.status === "resolved"
+          ? success
+          : { status: "target-not-ready", reason: resolution.reason };
+      }
+    );
+
+    const result = await ensureGameProvisionedWithRetry(
+      { displayName: "Arc the Lad II", processId: 4242 },
+      {
+        isSupported: () => true,
+        getForegroundSnapshot: () => genericForeground,
+        getWindowOptions: async () => [genericOption],
+        ensureAttempt,
+        wait: async () => undefined,
+      },
+      {
+        attempts: 6,
+        delayMs: 0,
+        launchScopedExactPidAfterAttempts: 1,
+      }
+    );
+
+    expect(result.status).toBe("target-not-ready");
+    expect(ensureAttempt).toHaveBeenCalledTimes(6);
   });
 
   it("uses PID strictly first, then safely falls back after launcher handoff", async () => {
