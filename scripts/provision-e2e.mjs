@@ -30,6 +30,89 @@ function runNode(script, forwardedArgs) {
 const forwarded = args.filter((arg) => arg !== "--confirm-write");
 const diagnose = () =>
   JSON.parse(runNode("scripts/provision-diagnose.mjs", forwarded));
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+function focusKnownLaunchWindow(pids) {
+  const validPids = [...new Set(pids ?? [])].filter(
+    (pid) => Number.isInteger(pid) && pid > 0
+  );
+  if (validPids.length === 0) return false;
+
+  const pidList = validPids.join(",");
+  try {
+    const stdout = execFileSync(
+      "powershell.exe",
+      [
+        "-NoProfile",
+        "-NonInteractive",
+        "-Command",
+        `Add-Type @'
+using System;
+using System.Runtime.InteropServices;
+public static class LaunchFocus {
+  [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hWnd);
+}
+'@; $candidate = Get-Process -Id ${pidList} -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowHandle -ne 0 } | Select-Object -First 1; if ($candidate) { [bool][LaunchFocus]::SetForegroundWindow($candidate.MainWindowHandle) } else { $false }`,
+      ],
+      { encoding: "utf8", timeout: 3_000, windowsHide: true }
+    ).trim();
+    return stdout.toLocaleLowerCase() === "true";
+  } catch {
+    return false;
+  }
+}
+
+async function waitForOwnedForeground(timeoutMs = 20_000) {
+  const deadline = Date.now() + timeoutMs;
+  let last = null;
+  let lastError = null;
+  let attempts = 0;
+
+  while (Date.now() < deadline) {
+    attempts += 1;
+    try {
+      last = diagnose();
+      lastError = null;
+
+      const processId = last.requested?.processId;
+      const foregroundOwned =
+        !processId || last.lineage?.foregroundOwned === true;
+      if (last.result === "safe-to-provision" && foregroundOwned) {
+        return last;
+      }
+
+      if (processId) {
+        // Running this helper from a terminal can itself leave the terminal as
+        // the foreground window. Best-effort focus a visible window that is
+        // already proven to be in the known Playnite launch tree, then require
+        // a fresh diagnostic snapshot to prove ownership before any write.
+        focusKnownLaunchWindow(last.lineage?.knownPids);
+      }
+    } catch (error) {
+      lastError = error instanceof Error ? error.message : String(error);
+    }
+
+    await sleep(750);
+  }
+
+  throw new Error(
+    "Read-only preflight did not observe a safe foreground window owned by the Playnite launch tree within " +
+      timeoutMs +
+      "ms. No provisioning write was attempted.\n" +
+      JSON.stringify(
+        {
+          attempts,
+          lastError,
+          foreground: last?.foreground ?? null,
+          lineage: last?.lineage ?? null,
+          resolver: last?.resolver ?? null,
+          result: last?.result ?? null,
+        },
+        null,
+        2
+      )
+  );
+}
 
 function restoreForeground(hwnd) {
   if (!hwnd) return;
@@ -73,24 +156,13 @@ function isOcrProcessRunning() {
   }
 }
 
-const before = diagnose();
+const before = await waitForOwnedForeground();
 const beforeBinding = before.existing?.bindings?.find(
   (binding) =>
     binding.externalId === before.requested.externalId &&
     binding.pending === false &&
     Boolean(binding.sceneId)
 );
-if (before.result !== "safe-to-provision") {
-  throw new Error(
-    "Read-only preflight is not safe-to-provision:\n" +
-      JSON.stringify(before, null, 2)
-  );
-}
-if (before.requested.processId && !before.lineage?.foregroundOwned) {
-  throw new Error(
-    "Read-only preflight did not prove that the foreground PID belongs to the Playnite launch tree."
-  );
-}
 
 const applyOutput = runNode("scripts/provision-apply.mjs", [
   ...forwarded,
@@ -103,7 +175,6 @@ try {
   apply = { raw: applyOutput };
 }
 
-const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const deadline = Date.now() + 30_000;
 let after = null;
 
