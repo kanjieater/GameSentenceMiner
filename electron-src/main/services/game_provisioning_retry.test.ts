@@ -306,6 +306,83 @@ describe("game provisioning whole-operation retry", () => {
     expect(ensureAttempt).toHaveBeenCalledOnce();
   });
 
+  it("provisions from a unique launch-owned OBS target even when another app stays foreground", async () => {
+    const terminalForeground: ForegroundWindowSnapshot = {
+      hwnd: "999",
+      pid: 8888,
+      title: "π - ke",
+      executableName: "WindowsTerminal.exe",
+      capturedAt: 2,
+      sequence: 2,
+    };
+    const realizeOption: ObsWindowOption = {
+      title: "_REALIZE -Panorama Luminary-",
+      suggestedSceneName: "_REALIZE -Panorama Luminary-",
+      value: "_REALIZE -Panorama Luminary-:Qt682QWindowIcon:pcsx2-qt.exe",
+      targetKind: "window",
+      captureValues: {
+        window_capture:
+          "_REALIZE -Panorama Luminary-:Qt682QWindowIcon:pcsx2-qt.exe",
+        game_capture:
+          "_REALIZE -Panorama Luminary-:Qt682QWindowIcon:pcsx2-qt.exe",
+      },
+    };
+
+    const ensureAttempt = vi.fn(
+      async (
+        _request: GameProvisioningRequest,
+        resolver: GameCaptureTargetResolver
+      ): Promise<GameProvisioningResult> => {
+        const resolution = await resolver({
+          displayName: "Realize - Panorama Luminary",
+          processId: 53768,
+          externalId: "playnite:realize",
+        });
+        if (resolution.status === "resolved") {
+          expect(resolution.target).toEqual(
+            expect.objectContaining({
+              title: realizeOption.title,
+              durableSwitcherSafe: false,
+              launchProcessId: 53768,
+            })
+          );
+          return success;
+        }
+        return { status: "target-not-ready", reason: resolution.reason };
+      }
+    );
+
+    const result = await ensureGameProvisionedWithRetry(
+      {
+        displayName: "Realize - Panorama Luminary",
+        processId: 53768,
+        externalId: "playnite:realize",
+      },
+      {
+        isSupported: () => true,
+        getForegroundSnapshot: () => terminalForeground,
+        getWindowOptions: async () => [realizeOption],
+        getProcessRelationships: async () => [
+          {
+            pid: 53768,
+            parentPid: 1,
+            executableName: "pcsx2-qt.exe",
+          },
+        ],
+        ensureAttempt,
+        wait: async () => undefined,
+      },
+      {
+        attempts: 1,
+        delayMs: 0,
+        launchOwnershipDelayAttempts: 0,
+      }
+    );
+
+    expect(result.status).toBe("already-configured");
+    expect(ensureAttempt).toHaveBeenCalledOnce();
+  });
+
   it("uses PID strictly first, then safely falls back after launcher handoff", async () => {
     const ensureAttempt = vi.fn(
       async (
