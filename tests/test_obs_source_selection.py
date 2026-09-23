@@ -1391,3 +1391,30 @@ def test_is_image_empty_near_black_obs_noise():
     img3 = Image.new("RGB", (64, 64), (0, 0, 0))
     img3.putpixel((0, 0), (60, 60, 60))  # max=60 > 30 → non-empty
     assert obs_launch_module.is_image_empty(img3) is False
+
+def test_crt_scanline_preprocess_normalizes_aliases():
+    assert obs_actions_module._normalize_ocr_preprocess_mode("crt") == "crt_scanlines"
+    assert obs_actions_module._normalize_ocr_preprocess_mode("scanlines") == "crt_scanlines"
+
+
+def test_crt_scanline_preprocess_downsamples_to_1080p_and_keeps_color():
+    img = Image.new("RGB", (1920, 1200), (40, 80, 120))
+    img.paste((180, 210, 240), (960, 600, 1920, 1200))
+
+    processed = obs_actions_module._apply_ocr_preprocessing(img, preprocess_mode="crt_scanlines")
+
+    assert img.size == (1920, 1200)
+    assert processed.size == (1728, 1080)
+    assert processed.mode == "RGB"
+    assert processed.getextrema() == ((0, 255), (0, 255), (0, 255))
+
+
+def test_crt_scanline_preprocess_does_not_resize_1080p_input():
+    img = Image.new("RGB", (1920, 1080), (40, 80, 120))
+    img.paste((180, 210, 240), (960, 540, 1920, 1080))
+
+    processed = obs_actions_module._apply_ocr_preprocessing(img, preprocess_mode="crt_scanlines")
+
+    assert processed.size == img.size
+    assert processed.mode == "RGB"
+
