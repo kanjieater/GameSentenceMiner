@@ -50,13 +50,17 @@ export async function getWindowsProcessRelationships(): Promise<ProcessRelations
     "Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId | ConvertTo-Json -Compress",
   ].join("; ");
 
-  const { stdout } = await execFileAsync("powershell.exe", [
-    "-NoProfile",
-    "-NonInteractive",
-    "-Command",
-    script,
-  ]);
-  const raw = stdout.trim();
+  const { stdout } = await execFileAsync(
+    "powershell.exe",
+    [
+      "-NoProfile",
+      "-NonInteractive",
+      "-Command",
+      script,
+    ],
+    { encoding: "utf8", windowsHide: true }
+  );
+  const raw = String(stdout).trim();
   if (!raw) {
     return [];
   }
