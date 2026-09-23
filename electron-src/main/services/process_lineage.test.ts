@@ -58,13 +58,27 @@ describe("launch process lineage", () => {
   it("normalizes PowerShell/CIM JSON shapes", () => {
     expect(
       normalizeProcessRelationships([
-        { ProcessId: 100, ParentProcessId: 1 },
-        { ProcessId: "200", ParentProcessId: "100" },
-        { ProcessId: 0, ParentProcessId: 1 },
+        { ProcessId: 100, ParentProcessId: 1, Name: "pcsx2-qt.exe" },
+        { ProcessId: "200", ParentProcessId: "100", Name: "game.exe" },
+        { ProcessId: 0, ParentProcessId: 1, Name: "invalid.exe" },
       ])
     ).toEqual([
-      { pid: 100, parentPid: 1 },
-      { pid: 200, parentPid: 100 },
+      { pid: 100, parentPid: 1, executableName: "pcsx2-qt.exe" },
+      { pid: 200, parentPid: 100, executableName: "game.exe" },
+    ]);
+  });
+
+  it("retains executable identity for proven launch processes", () => {
+    const tree = new LaunchProcessTree(100);
+
+    tree.observe([
+      { pid: 100, parentPid: 1, executableName: "pcsx2-qt.exe" },
+      { pid: 200, parentPid: 100, executableName: "helper.exe" },
+    ]);
+
+    expect(tree.getKnownProcesses()).toEqual([
+      { pid: 100, executableName: "pcsx2-qt.exe" },
+      { pid: 200, executableName: "helper.exe" },
     ]);
   });
 });
