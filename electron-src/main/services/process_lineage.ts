@@ -69,8 +69,10 @@ export async function getWindowsProcessRelationships(): Promise<ProcessRelations
 
   const script = [
     "$OutputEncoding=[Console]::OutputEncoding=[Text.UTF8Encoding]::new($false)",
+    "$titles=@{}",
+    "Get-Process -ErrorAction SilentlyContinue | ForEach-Object {$titles[$_.Id]=$_.MainWindowTitle}",
     "$items=Get-CimInstance Win32_Process",
-    "$rows=foreach($item in $items){$title='';try{$title=(Get-Process -Id $item.ProcessId -ErrorAction Stop).MainWindowTitle}catch{};[pscustomobject]@{ProcessId=$item.ProcessId;ParentProcessId=$item.ParentProcessId;Name=$item.Name;MainWindowTitle=$title}}",
+    "$rows=foreach($item in $items){$title=$titles[$item.ProcessId];[pscustomobject]@{ProcessId=$item.ProcessId;ParentProcessId=$item.ParentProcessId;Name=$item.Name;MainWindowTitle=$title}}",
     "$rows | ConvertTo-Json -Compress",
   ].join("; ");
 
