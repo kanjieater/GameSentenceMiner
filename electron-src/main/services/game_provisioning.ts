@@ -11,7 +11,6 @@ export interface GameProvisioningRequest {
   displayName: string;
   processId?: number;
   externalId?: string;
-  launchKind?: "emulator";
   defaultMode?: "ocr";
 }
 
@@ -39,6 +38,8 @@ export interface ProvisioningCaptureTarget {
    * durable scene-switcher rule (for example, a shared emulator window title).
    */
   durableSwitcherSafe?: boolean;
+  /** Actual foreground PID proven to belong to this Playnite launch. */
+  launchProcessId?: number;
 }
 
 export interface ExistingProvisioningState {
