@@ -3050,6 +3050,14 @@ class OBSScreenshotThread(threading.Thread):
             getattr(self, "source_height", None) or capture_height,
         )
 
+    def get_capture_preprocess_mode(self):
+        import GameSentenceMiner.obs as obs
+
+        scene_mode = getattr(self.ocr_config, "obs_capture_preprocess", None)
+        if scene_mode is not None and str(scene_mode).strip():
+            return obs._normalize_ocr_preprocess_mode(preprocess_mode=scene_mode)
+        return get_ocr_obs_capture_preprocess_mode()
+
     def connect_obs(self):
         import GameSentenceMiner.obs as obs
 
@@ -3152,7 +3160,6 @@ class OBSScreenshotThread(threading.Thread):
 
         self.connect_obs()
         self.init_config()
-        capture_preprocess_mode = get_ocr_obs_capture_preprocess_mode()
         while not terminated:
             if not screenshot_event.wait(timeout=0.1):
                 continue
@@ -3160,7 +3167,6 @@ class OBSScreenshotThread(threading.Thread):
             if not self.ocr_config:
                 logger.info("No OCR config found for the current scene. Waiting for scene switch.")
                 self.init_config()
-                capture_preprocess_mode = get_ocr_obs_capture_preprocess_mode()
                 self.write_result(None)
                 continue
 
@@ -3174,6 +3180,7 @@ class OBSScreenshotThread(threading.Thread):
                     time.sleep(self.inactive_source_retry_interval)
                     continue
 
+                capture_preprocess_mode = self.get_capture_preprocess_mode()
                 img = obs.get_screenshot_PIL(
                     source_name=self.current_source_name,
                     width=self.width,
@@ -3194,6 +3201,8 @@ class OBSScreenshotThread(threading.Thread):
                     continue
 
                 capture_width, capture_height = img.size
+                if (capture_width, capture_height) != (self.width, self.height):
+                    self.ocr_config.scale_to_custom_size(capture_width, capture_height)
                 img, crop_offset = apply_ocr_config_to_image(img, self.ocr_config, return_full_size=False)
                 primary_rectangles = []
                 if self.ocr_config and getattr(self.ocr_config, "rectangles", None):
