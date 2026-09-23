@@ -152,6 +152,40 @@ DEFAULT_STORE_CONFIG: Dict[str, Any] = {
 }
 
 
+# Runtime-only OCR preset used by newly auto-provisioned Playnite profiles.
+# It intentionally overrides recognition/stability defaults without rewriting
+# the user's persisted global OCR preferences, hotkeys, clipboard behavior, or
+# per-scene furigana settings.
+BASIC_PROFILE_OCR_OVERRIDES: Dict[str, Any] = {
+    "advancedMode": False,
+    "twoPassOCR": True,
+    "optimize_second_scan": True,
+    "text_appears_instantly": False,
+    "ocr1": DEFAULT_STABILITY_OCR,
+    "ocr2": "glens",
+    "scanRate": 0.5,
+    "language": "ja",
+    "base_scale": 0.75,
+    "duplicate_similarity_threshold": 80,
+    "change_detection_threshold": 20,
+    "evolving_prefix_similarity_threshold": 85,
+    "truncation_compare_threshold_min": 70,
+    "truncation_strict_threshold_min": 75,
+    "truncation_similarity_margin": 15,
+    "truncation_min_length": 8,
+    "truncation_min_ratio_percent": 25,
+    "subset_chunk_min_length": 5,
+    "matching_block_short_chunk_char_limit": 4,
+    "matching_block_small_chunk_min_size": 1,
+    "matching_block_default_min_size": 2,
+    "subset_coverage_floor_percent": 80,
+    "subset_coverage_ceiling_percent": 95,
+    "subset_coverage_threshold_offset": 5,
+    "subset_longest_block_min_chars": 2,
+    "subset_longest_block_divisor": 4,
+}
+
+
 def _clone(value: Any) -> Any:
     return copy.deepcopy(value)
 
@@ -327,7 +361,10 @@ def get_database_backup_settings() -> Dict[str, Any]:
 
 def _get_ocr_config() -> Dict[str, Any]:
     config = electron_store.get("OCR", {})
-    return config if isinstance(config, dict) else {}
+    normalized = config if isinstance(config, dict) else {}
+    if os.environ.get("GSM_OCR_PROFILE_PRESET", "").strip().lower() == "basic-default":
+        return {**normalized, **BASIC_PROFILE_OCR_OVERRIDES}
+    return normalized
 
 
 def _get_ocr_value(key: str, default: Any = None) -> Any:
