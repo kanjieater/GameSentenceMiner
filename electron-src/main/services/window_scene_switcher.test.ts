@@ -139,6 +139,157 @@ describe("window scene switcher migration", () => {
   });
 });
 
+describe("launch-scoped scene associations", () => {
+  beforeEach(() => {
+    config = {
+      schemaVersion: 1,
+      collections: [
+        {
+          collectionName: "Games",
+          collectionFileName: "Games.json",
+          enabled: true,
+          migrationVersion: 1,
+          legacySwitcherDisabled: true,
+          rules: [],
+        },
+      ],
+    };
+  });
+
+  it("keeps PID associations in memory without changing persistent switcher config", async () => {
+    const service = await loadService();
+    const before = structuredClone(config);
+
+    service.registerLaunchSceneAssociation({
+      collectionName: "Games",
+      externalId: "playnite:arc",
+      pid: 4242,
+      sceneUuid: "scene-arc",
+      sceneName: "Arc the Lad II",
+    });
+
+    expect(service.getLaunchSceneAssociation(4242, "Games")).toEqual({
+      collectionName: "Games",
+      externalId: "playnite:arc",
+      pid: 4242,
+      sceneUuid: "scene-arc",
+      sceneName: "Arc the Lad II",
+    });
+    expect(config).toEqual(before);
+  });
+
+  it("replaces the old PID when the same game launches again", async () => {
+    const service = await loadService();
+
+    service.registerLaunchSceneAssociation({
+      collectionName: "Games",
+      externalId: "playnite:arc",
+      pid: 4242,
+      sceneUuid: "scene-arc",
+      sceneName: "Arc the Lad II",
+    });
+    service.registerLaunchSceneAssociation({
+      collectionName: "Games",
+      externalId: "playnite:arc",
+      pid: 5252,
+      sceneUuid: "scene-arc",
+      sceneName: "Arc the Lad II",
+    });
+
+    expect(service.getLaunchSceneAssociation(4242, "Games")).toBeNull();
+    expect(service.getLaunchSceneAssociation(5252, "Games")).not.toBeNull();
+  });
+
+  it("refuses to silently let two scenes claim the same PID", async () => {
+    const service = await loadService();
+
+    service.registerLaunchSceneAssociation({
+      collectionName: "Games",
+      externalId: "playnite:arc",
+      pid: 4242,
+      sceneUuid: "scene-arc",
+      sceneName: "Arc the Lad II",
+    });
+
+    expect(() =>
+      service.registerLaunchSceneAssociation({
+        collectionName: "Games",
+        externalId: "playnite:dss",
+        pid: 4242,
+        sceneUuid: "scene-dss",
+        sceneName: "Dragon Shadow Spell",
+      })
+    ).toThrow(/already associated/);
+  });
+
+  it("prunes associations when their process is no longer alive", async () => {
+    const service = await loadService();
+
+    service.registerLaunchSceneAssociation({
+      collectionName: "Games",
+      externalId: "playnite:arc",
+      pid: 4242,
+      sceneUuid: "scene-arc",
+      sceneName: "Arc the Lad II",
+    });
+
+    expect(service.pruneLaunchSceneAssociations(() => false)).toBe(1);
+    expect(service.getLaunchSceneAssociation(4242, "Games")).toBeNull();
+  });
+
+  it("switches by launch PID even when there is intentionally no durable title rule", async () => {
+    vi.useFakeTimers();
+    try {
+      const service = await loadService();
+      let currentScene = { id: "scene-other", name: "Other" };
+      const switchScene = vi.fn(async (sceneUuid: string) => {
+        currentScene = { id: sceneUuid, name: "Arc the Lad II" };
+      });
+
+      service.configureWindowSceneSwitcherRuntime({
+        isOBSConnected: () => true,
+        getCurrentCollectionName: async () => "Games",
+        getScenes: async () => [
+          { id: "scene-other", name: "Other" },
+          { id: "scene-arc", name: "Arc the Lad II" },
+        ],
+        getCurrentScene: async () => currentScene,
+        switchScene,
+        suggestRule: async () => null,
+        restoreForegroundWindow: () => {},
+        requestForegroundSnapshot: () => {},
+      });
+      await Promise.resolve();
+      await Promise.resolve();
+
+      service.registerLaunchSceneAssociation({
+        collectionName: "Games",
+        externalId: "playnite:arc",
+        pid: 4242,
+        sceneUuid: "scene-arc",
+        sceneName: "Arc the Lad II",
+      });
+      service.handleForegroundWindowSnapshot({
+        hwnd: "1234",
+        pid: 4242,
+        title: "RetroArch SwanStation 1.0.0 4d309c0",
+        executableName: "retroarch.exe",
+        capturedAt: Date.now(),
+        sequence: 1,
+      });
+
+      await vi.advanceTimersByTimeAsync(200);
+
+      expect(switchScene).toHaveBeenCalledOnce();
+      expect(switchScene).toHaveBeenCalledWith("scene-arc");
+      expect(config.collections[0].rules).toEqual([]);
+      service.shutdownWindowSceneSwitcher();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
 describe("window scene switcher hook status", () => {
   beforeEach(() => {
     config = { schemaVersion: 1, collections: [] };
