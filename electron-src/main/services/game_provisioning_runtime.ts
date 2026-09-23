@@ -472,12 +472,20 @@ export function createGsmGameProvisioningDependencies(
             ? "launch-pid"
             : existing?.switchingMode ?? "durable-rule";
 
-        upsertGameProvisioningBinding(
-          externalId,
-          collection.collectionName,
-          scene,
-          switchingMode
-        );
+        if (switchingMode === "launch-pid") {
+          upsertGameProvisioningBinding(
+            externalId,
+            collection.collectionName,
+            scene,
+            switchingMode
+          );
+        } else {
+          upsertGameProvisioningBinding(
+            externalId,
+            collection.collectionName,
+            scene
+          );
+        }
 
         if (switchingMode === "launch-pid") {
           if (!request.processId || request.processId <= 0) {
