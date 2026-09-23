@@ -1392,6 +1392,7 @@ def test_is_image_empty_near_black_obs_noise():
     img3.putpixel((0, 0), (60, 60, 60))  # max=60 > 30 → non-empty
     assert obs_launch_module.is_image_empty(img3) is False
 
+
 def test_crt_scanline_preprocess_normalizes_aliases():
     assert obs_actions_module._normalize_ocr_preprocess_mode("crt") == "crt_scanlines"
     assert obs_actions_module._normalize_ocr_preprocess_mode("scanlines") == "crt_scanlines"
