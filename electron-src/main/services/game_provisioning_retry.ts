@@ -63,6 +63,7 @@ export async function ensureGameProvisionedWithRetry(
       {
         enforceProcessId: attempt < pidStrictAttempts,
         allowLaunchScopedExactPid:
+          request.launchKind === "emulator" &&
           attempt >= launchScopedExactPidAfterAttempts,
       }
     );
