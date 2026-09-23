@@ -61,6 +61,7 @@ export interface WindowSceneSwitcherRuntimeDependencies {
     getScenes: () => Promise<ObsSceneRef[] | null>;
     getCurrentScene: () => Promise<ObsSceneRef>;
     switchScene: (sceneUuid: string) => Promise<void>;
+    refreshCaptureSource?: (sceneUuid: string) => Promise<boolean>;
     suggestRule: (
         sceneUuid: string
     ) => Promise<{ titlePattern: string; executableName?: string } | null>;
@@ -788,6 +789,16 @@ async function performSceneSwitch(
         return;
     }
     if (verified.id === sceneUuid) {
+        if (dependencies.refreshCaptureSource) {
+            const refreshed = await dependencies.refreshCaptureSource(sceneUuid);
+            if (!refreshed) {
+                logDiagnostic(
+                    `capture-refresh-failed:${sceneUuid}:${generation}`,
+                    `OBS switched to "${targetName}", but its capture source could not be refreshed in place.`,
+                    'warn'
+                );
+            }
+        }
         logDiagnostic(
             `verified:${sceneUuid}:${generation}`,
             `Verified OBS switched to "${targetName}".`

@@ -3569,6 +3569,49 @@ export async function getSceneCaptureMode(
     }
 }
 
+/**
+ * Refresh an existing Windows capture input in place.
+ *
+ * Window Capture can retain the first matching HWND when an emulator is
+ * relaunched with the same class/title. Re-applying the current settings makes
+ * OBS resolve the live window without rebuilding the scene or its bindings.
+ */
+export async function refreshSceneCaptureSource(sceneUuid: string): Promise<boolean> {
+    const trimmedSceneUuid = sceneUuid.trim();
+    if (!trimmedSceneUuid) {
+        return false;
+    }
+
+    try {
+        await getOBSConnection();
+        const response = await callOBS('GetSceneItemList', {
+            sceneUuid: trimmedSceneUuid,
+        });
+        const captureItem = chooseSwitchableCaptureItem(response?.sceneItems ?? []);
+        if (!captureItem || !isSwitchableCaptureMode(captureItem.inputKind)) {
+            return false;
+        }
+
+        const inputSettings = await getInputSettingsForSceneItem(captureItem);
+        if (!inputSettings || Object.keys(inputSettings).length === 0) {
+            return false;
+        }
+
+        await callOBS('SetInputSettings', {
+            inputName: String(captureItem.sourceName ?? ''),
+            inputSettings,
+            overlay: false,
+        });
+        return true;
+    } catch (error: any) {
+        logObsError(
+            `Error refreshing capture source for scene "${trimmedSceneUuid}":`,
+            error?.message ?? error
+        );
+        return false;
+    }
+}
+
 export async function getScenePreviewSnapshot(
     sceneUuid?: string | null
 ): Promise<ObsScenePreviewSnapshot | null> {

@@ -362,6 +362,7 @@ describe("launch-scoped scene associations", () => {
       const switchScene = vi.fn(async (sceneUuid: string) => {
         currentScene = { id: sceneUuid, name: "Arc the Lad II" };
       });
+      const refreshCaptureSource = vi.fn(async () => true);
 
       service.configureWindowSceneSwitcherRuntime({
         isOBSConnected: () => true,
@@ -372,6 +373,7 @@ describe("launch-scoped scene associations", () => {
         ],
         getCurrentScene: async () => currentScene,
         switchScene,
+        refreshCaptureSource,
         suggestRule: async () => null,
         restoreForegroundWindow: () => {},
         requestForegroundSnapshot: () => {},
@@ -399,6 +401,8 @@ describe("launch-scoped scene associations", () => {
 
       expect(switchScene).toHaveBeenCalledOnce();
       expect(switchScene).toHaveBeenCalledWith("scene-arc");
+      expect(refreshCaptureSource).toHaveBeenCalledOnce();
+      expect(refreshCaptureSource).toHaveBeenCalledWith("scene-arc");
       expect(config.collections[0].rules).toEqual([]);
       service.shutdownWindowSceneSwitcher();
     } finally {

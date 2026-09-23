@@ -87,6 +87,7 @@ import {
     getCurrentScene,
     getOBSScenesForSceneSwitcher,
     getOBSWindowOptionsForProvisioning,
+    refreshSceneCaptureSource,
     isOBSConnected,
     launchOBSFromElectron,
     setOBSScene,
@@ -1643,6 +1644,7 @@ async function createWindow() {
         },
         getCurrentScene,
         switchScene: setOBSSceneByUuid,
+        refreshCaptureSource: refreshSceneCaptureSource,
         suggestRule: suggestWindowSceneSwitcherRule,
         requestForegroundSnapshot: () => {
             sendBackendCommand('refresh_foreground_window');
