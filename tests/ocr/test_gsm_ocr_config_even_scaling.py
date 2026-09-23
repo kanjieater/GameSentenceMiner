@@ -208,3 +208,15 @@ def test_get_overlay_minimum_character_size_falls_back_to_legacy_overlay_file(tm
     monkeypatch.setattr(gsm_ocr_config, "get_overlay_settings_path", lambda *args, **kwargs: str(overlay_settings_path))
 
     assert gsm_ocr_config.get_overlay_minimum_character_size(default=3) == 17
+
+def test_ocr_config_round_trip_preserves_scene_preprocess_override():
+    config = OCRConfig(
+        scene="Arc the Lad II",
+        rectangles=[],
+        obs_capture_preprocess="crt_scanlines",
+    )
+
+    restored = OCRConfig.from_json(config.to_json())
+
+    assert restored.obs_capture_preprocess == "crt_scanlines"
+
