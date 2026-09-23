@@ -18,7 +18,6 @@ interface EncodedGameProvisioningPayload {
   displayName: string;
   externalId: string;
   processId?: number;
-  launchKind?: "emulator";
 }
 
 export function createGameProvisioningSingleInstanceData(
@@ -129,7 +128,6 @@ function parseEncodedProvisioningToken(
         displayName: payload.displayName.trim(),
         externalId: payload.externalId.trim(),
         ...(processId ? { processId } : {}),
-        ...(payload.launchKind ? { launchKind: payload.launchKind } : {}),
         defaultMode: "ocr",
       },
     };
