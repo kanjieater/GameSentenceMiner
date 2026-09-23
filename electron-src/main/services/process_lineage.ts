@@ -1,4 +1,7 @@
-import { execFileAsync, isWindows } from "../util.js";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+
+const execFileAsync = promisify(execFile);
 
 export interface ProcessRelationship {
   pid: number;
@@ -38,7 +41,7 @@ export function normalizeProcessRelationships(value: unknown): ProcessRelationsh
  * not as a general high-frequency process monitor.
  */
 export async function getWindowsProcessRelationships(): Promise<ProcessRelationship[]> {
-  if (!isWindows()) {
+  if (process.platform !== "win32") {
     return [];
   }
 
