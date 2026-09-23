@@ -73,8 +73,7 @@ export async function ensureGameProvisionedWithRetry(
     const foreground = dependencies.getForegroundSnapshot();
     if (
       launchTree &&
-      foreground &&
-      !launchTree.owns(foreground.pid)
+      (!foreground || !launchTree.owns(foreground.pid))
     ) {
       try {
         launchTree.observe(await getProcessRelationships());
@@ -103,7 +102,14 @@ export async function ensureGameProvisionedWithRetry(
       }
     );
 
-    lastResult = await ensureAttempt(request, resolver);
+    const attemptRequest: GameProvisioningRequest = launchTree
+      ? {
+          ...request,
+          launchProcessIds: launchTree.getKnownPids(),
+        }
+      : request;
+
+    lastResult = await ensureAttempt(attemptRequest, resolver);
     if (lastResult.status !== "target-not-ready") {
       return lastResult;
     }
