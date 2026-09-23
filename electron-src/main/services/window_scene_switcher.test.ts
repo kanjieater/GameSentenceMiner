@@ -354,6 +354,55 @@ describe("launch-scoped scene associations", () => {
     }
   });
 
+  it("refreshes a launch-scoped capture even when OBS is already on that scene", async () => {
+    vi.useFakeTimers();
+    try {
+      const service = await loadService();
+      const currentScene = { id: "scene-arc", name: "Arc the Lad II" };
+      const switchScene = vi.fn(async () => {});
+      const refreshCaptureSource = vi.fn(async () => true);
+
+      service.configureWindowSceneSwitcherRuntime({
+        isOBSConnected: () => true,
+        getCurrentCollectionName: async () => "Games",
+        getScenes: async () => [currentScene],
+        getCurrentScene: async () => currentScene,
+        switchScene,
+        refreshCaptureSource,
+        suggestRule: async () => null,
+        restoreForegroundWindow: () => {},
+        requestForegroundSnapshot: () => {},
+      });
+      await Promise.resolve();
+      await Promise.resolve();
+
+      service.registerLaunchSceneAssociation({
+        collectionName: "Games",
+        externalId: "playnite:arc",
+        pid: 4242,
+        sceneUuid: "scene-arc",
+        sceneName: "Arc the Lad II",
+      });
+      service.handleForegroundWindowSnapshot({
+        hwnd: "1234",
+        pid: 4242,
+        title: "PCSX2",
+        executableName: "pcsx2-qt.exe",
+        capturedAt: Date.now(),
+        sequence: 1,
+      });
+
+      await vi.advanceTimersByTimeAsync(200);
+
+      expect(switchScene).not.toHaveBeenCalled();
+      expect(refreshCaptureSource).toHaveBeenCalledOnce();
+      expect(refreshCaptureSource).toHaveBeenCalledWith("scene-arc");
+      service.shutdownWindowSceneSwitcher();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("switches by launch PID even when there is intentionally no durable title rule", async () => {
     vi.useFakeTimers();
     try {
@@ -410,6 +459,74 @@ describe("launch-scoped scene associations", () => {
     }
   });
 });
+
+  it("does not refresh capture sources for ordinary persistent-rule switches", async () => {
+    vi.useFakeTimers();
+    try {
+      const service = await loadService();
+      let currentScene = { id: "scene-other", name: "Other" };
+      const switchScene = vi.fn(async (sceneUuid: string) => {
+        currentScene = { id: sceneUuid, name: "Steins;Gate" };
+      });
+      const refreshCaptureSource = vi.fn(async () => true);
+
+      config = {
+        schemaVersion: 1,
+        collections: [
+          {
+            collectionName: "Games",
+            collectionFileName: "Games.json",
+            enabled: true,
+            migrationVersion: 1,
+            legacySwitcherDisabled: true,
+            rules: [
+              {
+                sceneUuid: "scene-game",
+                sceneName: "Steins;Gate",
+                titlePattern: "Steins;Gate",
+                executableName: "game.exe",
+                enabled: true,
+                source: "manual",
+              },
+            ],
+          },
+        ],
+      };
+
+      service.configureWindowSceneSwitcherRuntime({
+        isOBSConnected: () => true,
+        getCurrentCollectionName: async () => "Games",
+        getScenes: async () => [
+          { id: "scene-other", name: "Other" },
+          { id: "scene-game", name: "Steins;Gate" },
+        ],
+        getCurrentScene: async () => currentScene,
+        switchScene,
+        refreshCaptureSource,
+        suggestRule: async () => null,
+        restoreForegroundWindow: () => {},
+        requestForegroundSnapshot: () => {},
+      });
+      await Promise.resolve();
+      await Promise.resolve();
+
+      service.handleForegroundWindowSnapshot({
+        hwnd: "2000",
+        pid: 9000,
+        title: "Steins;Gate",
+        executableName: "game.exe",
+        capturedAt: Date.now(),
+        sequence: 1,
+      });
+      await vi.advanceTimersByTimeAsync(200);
+
+      expect(switchScene).toHaveBeenCalledWith("scene-game");
+      expect(refreshCaptureSource).not.toHaveBeenCalled();
+      service.shutdownWindowSceneSwitcher();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 
 describe("window scene switcher hook status", () => {
   beforeEach(() => {
