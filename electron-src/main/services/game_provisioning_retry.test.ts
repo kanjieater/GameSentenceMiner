@@ -65,7 +65,7 @@ describe("game provisioning whole-operation retry", () => {
         ensureAttempt,
         wait,
       },
-      { attempts: 2, delayMs: 1 }
+      { attempts: 2, delayMs: 1, launchOwnershipDelayAttempts: 0 }
     );
 
     expect(result.status).toBe("already-configured");
