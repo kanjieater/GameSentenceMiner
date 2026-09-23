@@ -567,6 +567,7 @@ export function registerLaunchSceneAssociation(
     for (const tracker of launchSceneTrackers.values()) {
         const overlaps = [...seededPids].some((pid) => tracker.tree.owns(pid));
         if (
+            tracker.association.collectionName === normalized.collectionName &&
             overlaps &&
             (tracker.association.externalId !== normalized.externalId ||
                 tracker.association.sceneUuid !== normalized.sceneUuid)
