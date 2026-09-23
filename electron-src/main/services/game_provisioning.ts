@@ -32,6 +32,12 @@ export interface ProvisioningSceneProfile {
 export interface ProvisioningCaptureTarget {
   title: string;
   selection: ObsSceneCaptureWindowSelection;
+  /**
+   * False when the current launch is identified safely by exact PID/window/executable
+   * evidence, but the discovered title/executable is too generic to persist as a
+   * durable scene-switcher rule (for example, a shared emulator window title).
+   */
+  durableSwitcherSafe?: boolean;
 }
 
 export interface ExistingProvisioningState {
@@ -112,7 +118,8 @@ export interface GameProvisioningDependencies {
    */
   rememberProvisionedScene(
     request: GameProvisioningRequest,
-    scene: ProvisioningScene
+    scene: ProvisioningScene,
+    target?: ProvisioningCaptureTarget
   ): Promise<void> | void;
 }
 
@@ -250,7 +257,8 @@ export async function ensureGameProvisioned(
     // remain recoverable on the next call.
     await dependencies.rememberProvisionedScene(
       normalizedRequest,
-      createdScene
+      createdScene,
+      resolution.target
     );
 
     const existingProfile =
