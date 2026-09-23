@@ -36,7 +36,11 @@ describe("game provisioning target resolver", () => {
       )
     ).toEqual({
       status: "resolved",
-      target: { title: windowOption.title, selection: windowOption },
+      target: {
+        title: windowOption.title,
+        selection: windowOption,
+        launchProcessId: 4242,
+      },
     });
   });
 
@@ -107,7 +111,7 @@ describe("game provisioning target resolver", () => {
     });
   });
 
-  it("allows a stable exact-PID emulator target as launch-scoped identity", () => {
+  it("uses the Playnite root PID as launch identity even for a generic emulator title", () => {
     const emulatorForeground: ForegroundWindowSnapshot = {
       ...foreground,
       title: "RetroArch SwanStation 1.0.0 4d309c0",
