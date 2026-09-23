@@ -90,7 +90,7 @@ const electronExe = path.join(
 const logDirectory = path.join(repoRoot, "temp");
 fs.mkdirSync(logDirectory, { recursive: true });
 const logPath = path.join(logDirectory, "provision-source-electron.log");
-const logFd = fs.openSync(logPath, "a");
+const logFd = fs.openSync(logPath, "w");
 
 const child = spawn(electronExe, [repoRoot, token], {
   cwd: repoRoot,
