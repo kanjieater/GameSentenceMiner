@@ -70,6 +70,7 @@ class OCRConfig:
     window_geometry: Optional[WindowGeometry] = None
     window: Optional[str] = None
     language: str = "ja"
+    obs_capture_preprocess: Optional[str] = None
 
     def __post_init__(self):
         self.pre_scale_rectangles = deepcopy(self.rectangles)
@@ -114,6 +115,9 @@ def has_config_changed(current_config: OCRConfig) -> bool:
     )
     if new_config.rectangles != current_config.rectangles:
         logger.info("OCR config has changed.")
+        return True
+    if new_config.obs_capture_preprocess != current_config.obs_capture_preprocess:
+        logger.info("OCR preprocess config has changed.")
         return True
     return False
 
