@@ -704,9 +704,13 @@ def get_ocr_obs_capture_preprocess_mode() -> str:
         "grayscale_sharpened": "grayscale_unsharp",
         "enhanced": "grayscale_unsharp",
         "sharpen": "grayscale_unsharp",
+        "crt": "crt_scanlines",
+        "crt_scanline": "crt_scanlines",
+        "scanline": "crt_scanlines",
+        "scanlines": "crt_scanlines",
     }
     normalized = aliases.get(raw_value, raw_value)
-    if normalized not in {"none", "grayscale", "grayscale_unsharp"}:
+    if normalized not in {"none", "grayscale", "grayscale_unsharp", "crt_scanlines"}:
         return "none"
     return normalized
 
