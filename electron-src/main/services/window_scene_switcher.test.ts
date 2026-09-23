@@ -222,6 +222,32 @@ describe("launch-scoped scene associations", () => {
     ).toThrow(/already associated/);
   });
 
+  it("fails closed when two launch trees overlap", async () => {
+    const service = await loadService();
+
+    service.registerLaunchSceneAssociation({
+      collectionName: "Games",
+      externalId: "playnite:first",
+      pid: 100,
+      sceneUuid: "scene-first",
+      sceneName: "First",
+    });
+    service.registerLaunchSceneAssociation({
+      collectionName: "Games",
+      externalId: "playnite:second",
+      pid: 200,
+      sceneUuid: "scene-second",
+      sceneName: "Second",
+    });
+
+    expect(() =>
+      service.observeLaunchSceneProcessRelationships([
+        { pid: 200, parentPid: 100 },
+      ])
+    ).toThrow(/multiple launch-scoped scenes/);
+    expect(service.getLaunchSceneAssociation(200, "Games")).toBeNull();
+  });
+
   it("prunes associations when their process is no longer alive", async () => {
     const service = await loadService();
 
