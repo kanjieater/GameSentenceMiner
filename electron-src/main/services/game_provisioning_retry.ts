@@ -68,6 +68,7 @@ export async function ensureGameProvisionedWithRetry(
       : null;
   const getProcessRelationships =
     dependencies.getProcessRelationships ?? getWindowsProcessRelationships;
+  let latestProcessSnapshot: ProcessRelationship[] = [];
 
   for (let attempt = 0; attempt < attempts; attempt += 1) {
     const foreground = dependencies.getForegroundSnapshot();
@@ -76,7 +77,8 @@ export async function ensureGameProvisionedWithRetry(
       (!foreground || !launchTree.owns(foreground.pid))
     ) {
       try {
-        launchTree.observe(await getProcessRelationships());
+        latestProcessSnapshot = await getProcessRelationships();
+        launchTree.observe(latestProcessSnapshot);
       } catch {
         // Process ancestry is strong positive evidence when available, but a
         // transient CIM/PowerShell failure should not abort the whole retry
@@ -96,6 +98,10 @@ export async function ensureGameProvisionedWithRetry(
               launchProcesses:
                 attempt >= launchOwnershipDelayAttempts
                   ? launchTree.getKnownProcesses()
+                  : [],
+              processSnapshot:
+                attempt >= launchOwnershipDelayAttempts
+                  ? latestProcessSnapshot
                   : [],
             }
           : {}),
