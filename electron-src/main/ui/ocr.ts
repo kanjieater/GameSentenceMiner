@@ -686,12 +686,15 @@ export async function startOCR(
         if (useBasicDefaultPreset || ocr_config.optimize_second_scan || !ocr_config.advancedMode) {
             command.push('--optimize_second_scan');
         }
-        if (shouldEnableLegacyKeepNewlineFlag(ocr_config)) command.push('--keep_newline');
+        if (useBasicDefaultPreset || shouldEnableLegacyKeepNewlineFlag(ocr_config)) {
+            command.push('--keep_newline');
+        }
 
         runOCR(command, {
             source: options?.source ?? 'user',
             mode: 'auto',
             restartReason: options?.restartReason,
+            ocrPreset: options?.ocrPreset,
         });
     }
 }
