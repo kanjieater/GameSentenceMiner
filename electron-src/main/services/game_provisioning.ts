@@ -11,6 +11,7 @@ export interface GameProvisioningRequest {
   displayName: string;
   processId?: number;
   externalId?: string;
+  launchKind?: "emulator";
   defaultMode?: "ocr";
 }
 
