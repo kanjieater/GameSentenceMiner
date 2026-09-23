@@ -1035,6 +1035,20 @@ def test_obs_screenshot_thread_skips_rescale_when_frame_size_is_unchanged():
     assert calls == []
 
 
+def test_manual_obs_preprocess_resolver_prefers_scene_override(monkeypatch):
+    config = SimpleNamespace(obs_capture_preprocess="crt_scanlines")
+    monkeypatch.setattr(gsm_ocr, "get_ocr_obs_capture_preprocess_mode", lambda: "grayscale")
+
+    assert gsm_ocr._resolve_obs_capture_preprocess_mode(config) == "crt_scanlines"
+
+
+def test_manual_obs_preprocess_resolver_falls_back_to_global(monkeypatch):
+    config = SimpleNamespace(obs_capture_preprocess=None)
+    monkeypatch.setattr(gsm_ocr, "get_ocr_obs_capture_preprocess_mode", lambda: "grayscale")
+
+    assert gsm_ocr._resolve_obs_capture_preprocess_mode(config) == "grayscale"
+
+
 def test_apply_ipc_config_reload_refreshes_hotkeys_and_clipboard_toggle(monkeypatch):
     events = []
 
