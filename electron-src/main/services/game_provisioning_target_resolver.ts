@@ -20,6 +20,7 @@ export interface GameProvisioningTargetResolverDependencies {
 export interface GameProvisioningTargetResolverOptions {
   enforceProcessId?: boolean;
   isLaunchProcess?: (pid: number) => boolean;
+  launchProcesses?: Array<{ pid: number; executableName?: string }>;
 }
 
 function normalizeTitle(value: string | undefined): string {
@@ -56,6 +57,63 @@ function optionBelongsToRequestedGame(
   return suggested === requested || title === requested;
 }
 
+function resolveUniqueLaunchOwnedOption(
+  options: ObsWindowOption[],
+  launchProcesses: Array<{ pid: number; executableName?: string }> | undefined
+): CaptureTargetResolution | null {
+  if (!launchProcesses || launchProcesses.length === 0) {
+    return null;
+  }
+
+  const launchExecutables = new Map<string, number>();
+  for (const process of launchProcesses) {
+    const executable = normalizeExecutableName(process.executableName).toLocaleLowerCase();
+    if (!executable) continue;
+    if (!launchExecutables.has(executable)) {
+      launchExecutables.set(executable, process.pid);
+    }
+  }
+  if (launchExecutables.size === 0) {
+    return null;
+  }
+
+  const matches = options.filter((option) => {
+    if (option.targetKind !== "window") {
+      return false;
+    }
+    const executable = optionExecutable(option).toLocaleLowerCase();
+    return Boolean(executable && launchExecutables.has(executable));
+  });
+
+  if (matches.length === 0) {
+    return null;
+  }
+  if (matches.length > 1) {
+    return {
+      status: "not-ready",
+      reason:
+        "Multiple OBS Setup Capture targets match executables owned by the Playnite launch; waiting for a unique launch-owned target.",
+    };
+  }
+
+  const selection = matches[0];
+  const executable = optionExecutable(selection).toLocaleLowerCase();
+  const launchProcessId = launchExecutables.get(executable);
+  if (!launchProcessId) {
+    return null;
+  }
+
+  return {
+    status: "resolved",
+    target: {
+      title: selection.title,
+      selection,
+      durableSwitcherSafe: false,
+      launchProcessId,
+    },
+  };
+}
+
 export function resolveForegroundCaptureTarget(
   request: GameProvisioningRequest,
   foreground: ForegroundWindowSnapshot | null,
@@ -63,6 +121,13 @@ export function resolveForegroundCaptureTarget(
   resolverOptions: GameProvisioningTargetResolverOptions = {}
 ): CaptureTargetResolution {
   if (!foreground) {
+    const launchOwned = resolveUniqueLaunchOwnedOption(
+      options,
+      resolverOptions.launchProcesses
+    );
+    if (launchOwned) {
+      return launchOwned;
+    }
     return { status: "not-ready", reason: "GSM has not observed a foreground game window yet." };
   }
 
@@ -77,6 +142,13 @@ export function resolveForegroundCaptureTarget(
       : foreground.pid === requestedPid);
   const pidMismatch = requestedPid !== undefined && !launchOwned;
   if (pidMismatch && resolverOptions.enforceProcessId !== false) {
+    const launchOwnedTarget = resolveUniqueLaunchOwnedOption(
+      options,
+      resolverOptions.launchProcesses
+    );
+    if (launchOwnedTarget) {
+      return launchOwnedTarget;
+    }
     return {
       status: "not-ready",
       reason:
