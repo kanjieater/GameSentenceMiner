@@ -40,7 +40,7 @@ describe("game provisioning target resolver", () => {
     });
   });
 
-  it("preserves a Japanese PCSX2 window through production OBS merging and refuses an untranslated Playnite name", () => {
+  it("preserves a Japanese PCSX2 window and uses process ownership instead of translated title identity", () => {
     const title = "ドラゴンシャドウスペル";
     const value = "ドラゴンシャドウスペル:Qt682QWindowIcon:pcsx2-qt.exe";
     const [option] = mergeObsWindowItems([
@@ -57,46 +57,54 @@ describe("game provisioning target resolver", () => {
       title,
       captureValues: { window_capture: value, game_capture: value },
     });
-    expect(result).toEqual(expect.objectContaining({
-      status: "not-ready",
-      reason: expect.stringContaining("does not identify the requested game yet"),
-    }));
+    expect(result).toEqual({
+      status: "resolved",
+      target: {
+        title,
+        selection: { ...option, suggestedSceneName: title },
+        durableSwitcherSafe: false,
+        launchProcessId: 15300,
+      },
+    });
   });
 
-  it("refuses a matching Playnite PID when the foreground target is still a wrapper", () => {
-    const wrapperForeground: ForegroundWindowSnapshot = {
+  it("accepts a proven descendant process without comparing its title to the Playnite name", () => {
+    const childForeground: ForegroundWindowSnapshot = {
       ...foreground,
-      title: "Arc Launcher",
-      executableName: "launcher.exe",
+      pid: 7777,
+      title: "Completely Different Child Title",
+      executableName: "game.exe",
     };
-    const wrapperOption: ObsWindowOption = {
-      title: "Arc Launcher",
-      suggestedSceneName: "Arc Launcher",
-      value: "Arc Launcher:LauncherWindow:launcher.exe",
+    const childOption: ObsWindowOption = {
+      title: childForeground.title,
+      suggestedSceneName: childForeground.title,
+      value: "Completely Different Child Title:GameWindow:game.exe",
       targetKind: "window",
       captureValues: {
-        window_capture: "Arc Launcher:LauncherWindow:launcher.exe",
+        window_capture: "Completely Different Child Title:GameWindow:game.exe",
       },
     };
 
     expect(
       resolveForegroundCaptureTarget(
         {
-          displayName: "Arc the Lad II",
+          displayName: "Playnite Display Name",
           processId: 4242,
           externalId: "playnite:abc",
         },
-        wrapperForeground,
-        [wrapperOption]
+        childForeground,
+        [childOption],
+        { isLaunchProcess: (pid) => pid === 4242 || pid === 7777 }
       )
-    ).toEqual(
-      expect.objectContaining({
-        status: "not-ready",
-        reason: expect.stringContaining(
-          "does not identify the requested game yet"
-        ),
-      })
-    );
+    ).toEqual({
+      status: "resolved",
+      target: {
+        title: childOption.title,
+        selection: childOption,
+        durableSwitcherSafe: false,
+        launchProcessId: 7777,
+      },
+    });
   });
 
   it("allows a stable exact-PID emulator target as launch-scoped identity", () => {
@@ -130,8 +138,7 @@ describe("game provisioning target resolver", () => {
           externalId: "playnite:abc",
         },
         emulatorForeground,
-        [emulatorOption],
-        { allowLaunchScopedExactPid: true }
+        [emulatorOption]
       )
     ).toEqual({
       status: "resolved",
@@ -139,6 +146,7 @@ describe("game provisioning target resolver", () => {
         title: emulatorOption.title,
         selection: emulatorOption,
         durableSwitcherSafe: false,
+        launchProcessId: 4242,
       },
     });
   });
@@ -168,13 +176,12 @@ describe("game provisioning target resolver", () => {
           externalId: "playnite:dss",
         },
         localizedForeground,
-        [wrongExecutable],
-        { allowLaunchScopedExactPid: true }
+        [wrongExecutable]
       ).status
     ).toBe("not-ready");
   });
 
-  it("allows matching PID to relax executable proof once game identity is exact", () => {
+  it("requires OBS executable proof even when the foreground PID is launch-owned", () => {
     const noExecutable: ObsWindowOption = {
       ...windowOption,
       captureValues: {},
@@ -191,10 +198,12 @@ describe("game provisioning target resolver", () => {
         foreground,
         [noExecutable]
       )
-    ).toEqual({
-      status: "resolved",
-      target: { title: noExecutable.title, selection: noExecutable },
-    });
+    ).toEqual(
+      expect.objectContaining({
+        status: "not-ready",
+        reason: expect.stringContaining("could not verify"),
+      })
+    );
   });
 
   it("treats a mismatched requested PID as not-ready while PID enforcement is active", () => {
@@ -207,7 +216,7 @@ describe("game provisioning target resolver", () => {
     ).toEqual(
       expect.objectContaining({
         status: "not-ready",
-        reason: expect.stringContaining("does not match requested PID"),
+        reason: expect.stringContaining("not part of the Playnite launch"),
       })
     );
   });
