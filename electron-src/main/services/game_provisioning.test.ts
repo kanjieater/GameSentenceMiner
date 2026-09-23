@@ -83,7 +83,8 @@ describe("game provisioning core", () => {
     expect(dependencies.createSceneWithCapture).toHaveBeenCalledWith(request, target);
     expect(dependencies.rememberProvisionedScene).toHaveBeenCalledWith(
       request,
-      scene
+      scene,
+      target
     );
     expect(dependencies.upsertSceneLaunchProfile).toHaveBeenCalledWith(
       autoOcrProfile()
