@@ -3,9 +3,9 @@
  * Source-level dynamic provisioning E2E:
  *   diagnose -> apply -> verify durable config/OBS scene
  *
- * This verifies the whole GSM provisioning mutation without packaging. Actual
- * OCR runtime output is verified separately after the created scene becomes
- * active, because OCR is a live backend/session concern rather than config.
+ * This verifies the GSM provisioning mutation without packaging, then proves
+ * the generated scene becomes active and AutoLauncher starts an auto-mode OCR
+ * process. Recognized text output is the final live-content check.
  */
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
