@@ -481,20 +481,20 @@ export function observeLaunchSceneProcessRelationships(
         tracker.tree.observe(snapshot);
     }
 
-    const pidOwners = new Map<number, LaunchSceneTracker>();
+    const pidOwners = new Map<string, LaunchSceneTracker>();
     for (const tracker of launchSceneTrackers.values()) {
         for (const pid of tracker.tree.getKnownPids()) {
-            const existing = pidOwners.get(pid);
+            const ownerKey = tracker.association.collectionName + "\u0000" + pid;
+            const existing = pidOwners.get(ownerKey);
             if (
                 existing &&
-                (existing.association.collectionName !== tracker.association.collectionName ||
-                    existing.association.externalId !== tracker.association.externalId)
+                existing.association.externalId !== tracker.association.externalId
             ) {
                 throw new Error(
-                    `PID ${pid} is claimed by multiple launch-scoped scenes; refusing ambiguous process ownership.`
+                    `PID ${pid} is claimed by multiple launch-scoped scenes in collection "${tracker.association.collectionName}"; refusing ambiguous process ownership.`
                 );
             }
-            pidOwners.set(pid, tracker);
+            pidOwners.set(ownerKey, tracker);
         }
     }
 }
@@ -557,13 +557,13 @@ export function registerLaunchSceneAssociation(
 
     for (const tracker of launchSceneTrackers.values()) {
         if (
+            tracker.association.collectionName === normalized.collectionName &&
             tracker.tree.owns(normalized.pid) &&
-            (tracker.association.collectionName !== normalized.collectionName ||
-                tracker.association.externalId !== normalized.externalId ||
+            (tracker.association.externalId !== normalized.externalId ||
                 tracker.association.sceneUuid !== normalized.sceneUuid)
         ) {
             throw new Error(
-                `PID ${normalized.pid} is already associated with scene "${tracker.association.sceneName}"; refusing to silently reassign it.`
+                `PID ${normalized.pid} is already associated with scene "${tracker.association.sceneName}" in collection "${normalized.collectionName}"; refusing to silently reassign it.`
             );
         }
     }
