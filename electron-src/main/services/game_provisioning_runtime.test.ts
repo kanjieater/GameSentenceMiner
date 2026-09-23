@@ -1124,6 +1124,7 @@ describe("GSM game provisioning runtime binding", () => {
       sceneName: scene.name,
       textHookMode: "none",
       ocrMode: "auto",
+      ocrPreset: "basic-default",
       launchOverlay: false,
       agentScriptPath: "",
       launchDelaySeconds: 0,
