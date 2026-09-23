@@ -411,6 +411,16 @@ export function upsertGeneratedWindowSceneRule(
     return saved;
 }
 
+export interface LaunchSceneAssociation {
+    collectionName: string;
+    externalId: string;
+    pid: number;
+    sceneUuid: string;
+    sceneName: string;
+}
+
+const launchSceneAssociations = new Map<number, LaunchSceneAssociation>();
+
 let dependencies: WindowSceneSwitcherRuntimeDependencies | null = null;
 let activeCollectionName = '';
 let hookStatus: WindowSceneSwitcherHookStatus = isWindows() ? 'starting' : 'unsupported';
@@ -435,6 +445,100 @@ let foregroundReconcileTimer: ReturnType<typeof setInterval> | null = null;
 let foregroundReconcileInFlight = false;
 let latestDecisionKey = '';
 const diagnosticLastLoggedAt = new Map<string, number>();
+
+function isProcessAlive(pid: number): boolean {
+    try {
+        process.kill(pid, 0);
+        return true;
+    } catch (error: any) {
+        return error?.code === 'EPERM';
+    }
+}
+
+export function pruneLaunchSceneAssociations(
+    processAlive: (pid: number) => boolean = isProcessAlive
+): number {
+    let removed = 0;
+    for (const [pid] of launchSceneAssociations) {
+        if (!processAlive(pid)) {
+            launchSceneAssociations.delete(pid);
+            removed += 1;
+        }
+    }
+    return removed;
+}
+
+export function getLaunchSceneAssociation(
+    pid: number,
+    collectionName = activeCollectionName
+): LaunchSceneAssociation | null {
+    const association = launchSceneAssociations.get(pid);
+    if (!association || association.collectionName !== collectionName) {
+        return null;
+    }
+    return { ...association };
+}
+
+export function registerLaunchSceneAssociation(
+    association: LaunchSceneAssociation
+): void {
+    const normalized: LaunchSceneAssociation = {
+        collectionName: association.collectionName.trim(),
+        externalId: association.externalId.trim(),
+        pid: Math.trunc(association.pid),
+        sceneUuid: association.sceneUuid.trim(),
+        sceneName: association.sceneName.trim(),
+    };
+    if (
+        !normalized.collectionName ||
+        !normalized.externalId ||
+        normalized.pid <= 0 ||
+        !normalized.sceneUuid ||
+        !normalized.sceneName
+    ) {
+        throw new Error('A collection, external id, positive PID, and scene are required for launch-scoped switching.');
+    }
+
+    const atPid = launchSceneAssociations.get(normalized.pid);
+    if (
+        atPid &&
+        (atPid.collectionName !== normalized.collectionName ||
+            atPid.externalId !== normalized.externalId ||
+            atPid.sceneUuid !== normalized.sceneUuid)
+    ) {
+        throw new Error(
+            `PID ${normalized.pid} is already associated with scene "${atPid.sceneName}"; refusing to silently reassign it.`
+        );
+    }
+
+    for (const [pid, existing] of launchSceneAssociations) {
+        if (
+            existing.collectionName === normalized.collectionName &&
+            existing.externalId === normalized.externalId &&
+            pid !== normalized.pid
+        ) {
+            launchSceneAssociations.delete(pid);
+        }
+    }
+
+    launchSceneAssociations.set(normalized.pid, normalized);
+
+    if (
+        latestForeground?.pid === normalized.pid &&
+        activeCollectionName === normalized.collectionName
+    ) {
+        manualHoldContextKey = '';
+        scheduleEvaluation();
+    }
+}
+
+function removeLaunchSceneAssociationsForScene(sceneUuid: string): void {
+    for (const [pid, association] of launchSceneAssociations) {
+        if (association.sceneUuid === sceneUuid) {
+            launchSceneAssociations.delete(pid);
+        }
+    }
+}
 
 function describeForeground(snapshot: ForegroundWindowSnapshot): string {
     const executable = normalizeExecutableName(
@@ -564,7 +668,11 @@ async function showConflictPicker(conflict: WindowSceneSwitcherConflict): Promis
     }
 }
 
-async function performSceneSwitch(sceneUuid: string, generation: number): Promise<void> {
+async function performSceneSwitch(
+    sceneUuid: string,
+    generation: number,
+    targetNameOverride?: string
+): Promise<void> {
     if (!dependencies || generation !== latestGeneration || !obsConnected) {
         return;
     }
@@ -573,6 +681,7 @@ async function performSceneSwitch(sceneUuid: string, generation: number): Promis
         return;
     }
     const targetName =
+        targetNameOverride ??
         getActiveCollection()?.rules.find((rule) => rule.sceneUuid === sceneUuid)?.sceneName ??
         sceneUuid;
     if (current.id === sceneUuid) {
@@ -659,6 +768,26 @@ async function evaluateForeground(generation: number): Promise<void> {
         );
         return;
     }
+    const launchAssociation = getLaunchSceneAssociation(
+        latestForeground.pid,
+        collection.collectionName
+    );
+    if (launchAssociation) {
+        switchChain = switchChain
+            .then(() =>
+                performSceneSwitch(
+                    launchAssociation.sceneUuid,
+                    generation,
+                    launchAssociation.sceneName
+                )
+            )
+            .catch((error) =>
+                log.warn('[SceneSwitcher] Failed launch-scoped scene switch:', error)
+            );
+        await switchChain;
+        return;
+    }
+
     const candidates = findWindowSceneSwitcherCandidates(collection.rules, latestForeground);
     if (candidates.length === 0) {
         logDiagnostic(
@@ -720,6 +849,7 @@ async function runForegroundReconciliation(): Promise<void> {
     }
     foregroundReconcileInFlight = true;
     try {
+        pruneLaunchSceneAssociations();
         const runtimeOBSConnected = dependencies.isOBSConnected();
         if (!runtimeOBSConnected) {
             if (obsConnected || startupSceneSyncPending) {
@@ -1043,6 +1173,7 @@ export function renameWindowSceneSwitcherRule(sceneUuid: string, sceneName: stri
 }
 
 export function removeWindowSceneSwitcherRule(sceneUuid: string): void {
+    removeLaunchSceneAssociationsForScene(sceneUuid);
     const config = readConfig();
     let changed = false;
     for (const collection of config.collections) {
@@ -1066,6 +1197,14 @@ export async function reconcileWindowSceneSwitcherRules(scenes: ObsSceneRef[]): 
         return;
     }
     const scenesById = new Map(scenes.map((scene) => [scene.id, scene.name]));
+    for (const [pid, association] of launchSceneAssociations) {
+        if (
+            association.collectionName === activeCollectionName &&
+            !scenesById.has(association.sceneUuid)
+        ) {
+            launchSceneAssociations.delete(pid);
+        }
+    }
     collection.rules = collection.rules.flatMap((rule) => {
         const currentName = scenesById.get(rule.sceneUuid);
         return currentName ? [{ ...rule, sceneName: currentName }] : [];
@@ -1244,6 +1383,7 @@ export function shutdownWindowSceneSwitcher(): void {
     pendingConflict = null;
     closeConflictWindow();
     dependencies = null;
+    launchSceneAssociations.clear();
     latestDecisionKey = '';
     diagnosticLastLoggedAt.clear();
 }
