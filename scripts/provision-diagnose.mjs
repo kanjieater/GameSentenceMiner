@@ -91,8 +91,10 @@ async function getObsWindowOptions() {
     }] : []);
     const options = mergeObsWindowItems(rawItems).map((option) => ({
       ...option,
-      // Production derives this from the same title. The resolver's title
-      // match remains authoritative; the name is only ownership evidence.
+      // Production derives this from the foreground window title. This title
+      // is only used to correlate the foreground HWND/process with OBS's
+      // capture target; Playnite game identity comes from externalId + process
+      // lineage.
       suggestedSceneName: option.title,
     }));
     const [collectionInfo, sceneInfo] = await Promise.all([
