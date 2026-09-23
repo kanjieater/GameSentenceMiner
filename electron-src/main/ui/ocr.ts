@@ -675,7 +675,9 @@ export async function startOCR(
             `--obs_ocr`,
         ];
 
-        if (ocr_config.ocr_screenshots && ocr_config.advancedMode) command.push('--clipboard');
+        if (!useBasicDefaultPreset && ocr_config.ocr_screenshots && ocr_config.advancedMode) {
+            command.push('--clipboard');
+        }
         if (ocr_config.sendToClipboard) command.push('--clipboard-output');
         if (ocr_config.furigana_filter_sensitivity > 0)
             command.push(
