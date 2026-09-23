@@ -2,7 +2,7 @@ import type {
   GameProvisioningRequest,
   GameProvisioningResult,
 } from "./game_provisioning.js";
-import { ensureGameProvisionedWithGsm } from "./game_provisioning_runtime.js";
+import type { GameCaptureTargetResolver } from "./game_provisioning_runtime.js";
 import {
   createForegroundGameCaptureTargetResolver,
   type GameProvisioningTargetResolverDependencies,
@@ -18,7 +18,10 @@ export interface GameProvisioningRetryOptions {
 export interface GameProvisioningRetryDependencies
   extends GameProvisioningTargetResolverDependencies {
   wait?: (milliseconds: number) => Promise<void>;
-  ensureAttempt?: typeof ensureGameProvisionedWithGsm;
+  ensureAttempt?: (
+    request: GameProvisioningRequest,
+    resolveCaptureTarget: GameCaptureTargetResolver
+  ) => Promise<GameProvisioningResult>;
 }
 
 export async function ensureGameProvisionedWithRetry(
@@ -40,7 +43,14 @@ export async function ensureGameProvisionedWithRetry(
     dependencies.wait ??
     ((milliseconds: number) =>
       new Promise<void>((resolve) => setTimeout(resolve, milliseconds)));
-  const ensureAttempt = dependencies.ensureAttempt ?? ensureGameProvisionedWithGsm;
+  const ensureAttempt = dependencies.ensureAttempt ?? (async (
+    provisionRequest: GameProvisioningRequest,
+    resolveCaptureTarget: GameCaptureTargetResolver
+  ) => {
+    // Avoid loading Electron's OBS runtime when tests inject an attempt.
+    const { ensureGameProvisionedWithGsm } = await import("./game_provisioning_runtime.js");
+    return await ensureGameProvisionedWithGsm(provisionRequest, resolveCaptureTarget);
+  });
 
   let lastResult: GameProvisioningResult = {
     status: "target-not-ready",

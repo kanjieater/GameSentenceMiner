@@ -113,7 +113,21 @@ try {
   obsResult = { options: [], errors: [error instanceof Error ? error.message : String(error)] };
 }
 const request = { displayName, externalId, ...(processId ? { processId } : {}), defaultMode: "ocr" };
-const resolution = resolveForegroundCaptureTarget(request, foreground, obsResult.options);
+// This is the resolver configuration used after PR #10's exact-PID stability
+// gate. It still enforces PID equality, so launcher→child cases remain refused.
+const resolution = resolveForegroundCaptureTarget(request, foreground, obsResult.options, {
+  enforceProcessId: true,
+  allowLaunchScopedExactPid: true,
+});
+const planned = resolution.status === "resolved" ? {
+  sceneName: request.displayName,
+  externalIdBinding: request.externalId,
+  captureTarget: resolution.target,
+  launchPidAssociation: resolution.target.durableSwitcherSafe === false
+    ? { pid: request.processId, sceneName: request.displayName }
+    : null,
+  persistentWindowSceneRule: resolution.target.durableSwitcherSafe !== false,
+} : null;
 const electronConfigPath = path.join(process.env.APPDATA, "GameSentenceMiner", "electron", "config.json");
 const electronConfig = fs.existsSync(electronConfigPath) ? readJson(electronConfigPath) : {};
 const activeCollection = (electronConfig.windowSceneSwitcher?.collections || []).find((item) => item.enabled);
@@ -125,6 +139,7 @@ console.log(JSON.stringify({
   foreground,
   obs: { candidateCount: obsResult.options.length, candidates: obsResult.options, errors: obsResult.errors },
   resolver: resolution,
+  planned,
   existing: { activeCollection: activeCollection?.collectionName ?? null, bindings },
   result: resolution.status === "resolved" ? "safe-to-provision" : "not-ready",
 }, null, 2));

@@ -1104,7 +1104,8 @@ describe("GSM game provisioning runtime binding", () => {
       "Default",
       "Arc the Lad II",
       "Arc the Lad II - RetroArch",
-      "retroarch.exe"
+      "retroarch.exe",
+      "durable-rule"
     );
     expect(mocks.createSceneWithCapture).toHaveBeenCalledWith({
       title: "Arc the Lad II - RetroArch",
@@ -1117,7 +1118,7 @@ describe("GSM game provisioning runtime binding", () => {
         game_capture:
           "Arc the Lad II - RetroArch:Qt6QWindowIcon:retroarch.exe",
       },
-    });
+    }, { persistWindowSceneRule: true });
     expect(mocks.upsertSceneLaunchProfile).toHaveBeenCalledWith({
       sceneId: scene.id,
       sceneName: scene.name,
