@@ -493,13 +493,24 @@ export function createGsmGameProvisioningDependencies(
               `Provisioned game "${scene.name}" requires a current launch PID for scene switching.`
             );
           }
-          registerLaunchSceneAssociation({
-            collectionName: collection.collectionName,
-            externalId,
-            pid: request.processId,
-            sceneUuid: scene.id,
-            sceneName: scene.name,
-          });
+          const provenPids = new Set<number>(
+            (request.launchProcessIds ?? [])
+              .filter((pid) => Number.isInteger(pid) && pid > 0)
+              .map((pid) => Math.trunc(pid))
+          );
+          if (target?.launchProcessId && target.launchProcessId > 0) {
+            provenPids.add(Math.trunc(target.launchProcessId));
+          }
+          registerLaunchSceneAssociation(
+            {
+              collectionName: collection.collectionName,
+              externalId,
+              pid: request.processId,
+              sceneUuid: scene.id,
+              sceneName: scene.name,
+            },
+            provenPids
+          );
         }
       }
     },
