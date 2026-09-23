@@ -755,7 +755,8 @@ async function showConflictPicker(conflict: WindowSceneSwitcherConflict): Promis
 async function performSceneSwitch(
     sceneUuid: string,
     generation: number,
-    targetNameOverride?: string
+    targetNameOverride?: string,
+    refreshLaunchCapture = false
 ): Promise<void> {
     if (!dependencies || generation !== latestGeneration || !obsConnected) {
         return;
@@ -769,6 +770,16 @@ async function performSceneSwitch(
         getActiveCollection()?.rules.find((rule) => rule.sceneUuid === sceneUuid)?.sceneName ??
         sceneUuid;
     if (current.id === sceneUuid) {
+        if (refreshLaunchCapture && dependencies.refreshCaptureSource) {
+            const refreshed = await dependencies.refreshCaptureSource(sceneUuid);
+            if (!refreshed) {
+                logDiagnostic(
+                    `capture-refresh-failed:${sceneUuid}:${generation}`,
+                    `OBS is already on "${targetName}", but its launch-scoped capture source could not be refreshed in place.`,
+                    'warn'
+                );
+            }
+        }
         logDiagnostic(
             `current:${sceneUuid}:${generation}`,
             `OBS is already on the matched scene "${targetName}" for ${describeForeground(latestForeground!)}.`
@@ -789,7 +800,7 @@ async function performSceneSwitch(
         return;
     }
     if (verified.id === sceneUuid) {
-        if (dependencies.refreshCaptureSource) {
+        if (refreshLaunchCapture && dependencies.refreshCaptureSource) {
             const refreshed = await dependencies.refreshCaptureSource(sceneUuid);
             if (!refreshed) {
                 logDiagnostic(
@@ -882,7 +893,8 @@ async function evaluateForeground(generation: number): Promise<void> {
                 performSceneSwitch(
                     launchAssociation.sceneUuid,
                     generation,
-                    launchAssociation.sceneName
+                    launchAssociation.sceneName,
+                    true
                 )
             )
             .catch((error) =>
