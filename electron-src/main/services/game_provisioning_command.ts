@@ -18,6 +18,7 @@ interface EncodedGameProvisioningPayload {
   displayName: string;
   externalId: string;
   processId?: number;
+  launchKind?: "emulator";
 }
 
 export function createGameProvisioningSingleInstanceData(
@@ -111,12 +112,24 @@ function parseEncodedProvisioningToken(
       processId = payload.processId;
     }
 
+    if (
+      payload.launchKind !== undefined &&
+      payload.launchKind !== "emulator"
+    ) {
+      return {
+        kind: "invalid",
+        reason:
+          "Provisioning token launchKind must be "emulator" when supplied.",
+      };
+    }
+
     return {
       kind: "ensure-game",
       request: {
         displayName: payload.displayName.trim(),
         externalId: payload.externalId.trim(),
         ...(processId ? { processId } : {}),
+        ...(payload.launchKind ? { launchKind: payload.launchKind } : {}),
         defaultMode: "ocr",
       },
     };
