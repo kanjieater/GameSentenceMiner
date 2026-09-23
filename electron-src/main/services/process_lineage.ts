@@ -58,7 +58,11 @@ export async function getWindowsProcessRelationships(): Promise<ProcessRelations
       "-Command",
       script,
     ],
-    { encoding: "utf8", windowsHide: true }
+    {
+      encoding: "utf8",
+      windowsHide: true,
+      timeout: 3_000,
+    }
   );
   const raw = String(stdout).trim();
   if (!raw) {
