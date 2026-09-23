@@ -524,15 +524,15 @@ export function getLaunchSceneAssociation(
     pid: number,
     collectionName = activeCollectionName
 ): LaunchSceneAssociation | null {
-    for (const tracker of launchSceneTrackers.values()) {
-        if (
+    const matches = [...launchSceneTrackers.values()].filter(
+        (tracker) =>
             tracker.association.collectionName === collectionName &&
             tracker.tree.owns(pid)
-        ) {
-            return { ...tracker.association };
-        }
+    );
+    if (matches.length !== 1) {
+        return null;
     }
-    return null;
+    return { ...matches[0].association };
 }
 
 export function registerLaunchSceneAssociation(
@@ -837,7 +837,16 @@ async function evaluateForeground(generation: number): Promise<void> {
         );
         return;
     }
-    await refreshLaunchSceneOwnershipForForeground(latestForeground.pid);
+    try {
+        await refreshLaunchSceneOwnershipForForeground(latestForeground.pid);
+    } catch (error) {
+        logDiagnostic(
+            `launch-ownership-conflict:${latestForeground.pid}`,
+            `Could not establish unambiguous launch ownership for PID ${latestForeground.pid}: ${error instanceof Error ? error.message : String(error)}`,
+            'warn'
+        );
+        return;
+    }
     const launchAssociation = getLaunchSceneAssociation(
         latestForeground.pid,
         collection.collectionName
