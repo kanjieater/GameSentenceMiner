@@ -20,7 +20,11 @@ export interface GameProvisioningTargetResolverDependencies {
 export interface GameProvisioningTargetResolverOptions {
   enforceProcessId?: boolean;
   isLaunchProcess?: (pid: number) => boolean;
-  launchProcesses?: Array<{ pid: number; executableName?: string }>;
+  launchProcesses?: Array<{
+    pid: number;
+    executableName?: string;
+    windowTitle?: string;
+  }>;
 }
 
 function normalizeTitle(value: string | undefined): string {
@@ -59,31 +63,40 @@ function optionBelongsToRequestedGame(
 
 function resolveUniqueLaunchOwnedOption(
   options: ObsWindowOption[],
-  launchProcesses: Array<{ pid: number; executableName?: string }> | undefined
+  launchProcesses:
+    | Array<{ pid: number; executableName?: string; windowTitle?: string }>
+    | undefined
 ): CaptureTargetResolution | null {
   if (!launchProcesses || launchProcesses.length === 0) {
     return null;
   }
 
-  const launchExecutables = new Map<string, number>();
+  // Off-foreground resolution must still prove which exact launch PID owns
+  // the window. Executable equality alone is insufficient for shared
+  // emulators because another pcsx2/retroarch instance may be open.
+  const matches: Array<{ option: ObsWindowOption; pid: number }> = [];
   for (const process of launchProcesses) {
-    const executable = normalizeExecutableName(process.executableName).toLocaleLowerCase();
-    if (!executable) continue;
-    if (!launchExecutables.has(executable)) {
-      launchExecutables.set(executable, process.pid);
+    const executable = normalizeExecutableName(
+      process.executableName
+    ).toLocaleLowerCase();
+    const windowTitle = normalizeTitle(process.windowTitle);
+    if (!executable || !windowTitle) {
+      continue;
     }
-  }
-  if (launchExecutables.size === 0) {
-    return null;
-  }
 
-  const matches = options.filter((option) => {
-    if (option.targetKind !== "window") {
-      return false;
+    for (const option of options) {
+      if (option.targetKind !== "window") {
+        continue;
+      }
+      if (normalizeTitle(option.title) !== windowTitle) {
+        continue;
+      }
+      if (optionExecutable(option).toLocaleLowerCase() !== executable) {
+        continue;
+      }
+      matches.push({ option, pid: process.pid });
     }
-    const executable = optionExecutable(option).toLocaleLowerCase();
-    return Boolean(executable && launchExecutables.has(executable));
-  });
+  }
 
   if (matches.length === 0) {
     return null;
@@ -92,17 +105,11 @@ function resolveUniqueLaunchOwnedOption(
     return {
       status: "not-ready",
       reason:
-        "Multiple OBS Setup Capture targets match executables owned by the Playnite launch; waiting for a unique launch-owned target.",
+        "Multiple OBS Setup Capture targets are PID-correlated to the Playnite launch; waiting for a unique launch-owned window.",
     };
   }
 
-  const selection = matches[0];
-  const executable = optionExecutable(selection).toLocaleLowerCase();
-  const launchProcessId = launchExecutables.get(executable);
-  if (!launchProcessId) {
-    return null;
-  }
-
+  const [{ option: selection, pid: launchProcessId }] = matches;
   return {
     status: "resolved",
     target: {
