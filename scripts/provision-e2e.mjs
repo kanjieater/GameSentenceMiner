@@ -14,6 +14,7 @@ const args = process.argv.slice(2);
 if (!args.includes("--confirm-write")) {
   throw new Error("provision:e2e requires --confirm-write.");
 }
+const replaceInstalledPrimary = args.includes("--replace-installed-primary");
 
 function runNode(script, forwardedArgs) {
   return execFileSync(
@@ -27,7 +28,11 @@ function runNode(script, forwardedArgs) {
   ).trim();
 }
 
-const forwarded = args.filter((arg) => arg !== "--confirm-write");
+const forwarded = args.filter(
+  (arg) =>
+    arg !== "--confirm-write" &&
+    arg !== "--replace-installed-primary"
+);
 const diagnose = () =>
   JSON.parse(runNode("scripts/provision-diagnose.mjs", forwarded));
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -114,6 +119,69 @@ async function waitForOwnedForeground(timeoutMs = 20_000) {
   );
 }
 
+function getInstalledGsmPids() {
+  try {
+    const stdout = execFileSync(
+      "powershell.exe",
+      [
+        "-NoProfile",
+        "-NonInteractive",
+        "-Command",
+        "@(Get-Process GameSentenceMiner -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Id) -join ','",
+      ],
+      { encoding: "utf8", timeout: 5_000, windowsHide: true }
+    ).trim();
+    if (!stdout) return [];
+    return stdout
+      .split(",")
+      .map((value) => Number(value.trim()))
+      .filter((pid) => Number.isInteger(pid) && pid > 0);
+  } catch {
+    return [];
+  }
+}
+
+async function replaceInstalledGsmPrimaryForSourceTest(timeoutMs = 8_000) {
+  const initialPids = getInstalledGsmPids();
+  if (initialPids.length === 0) {
+    return { requested: true, closedPids: [] };
+  }
+
+  try {
+    execFileSync(
+      "powershell.exe",
+      [
+        "-NoProfile",
+        "-NonInteractive",
+        "-Command",
+        `Stop-Process -Id ${initialPids.join(",")} -Force -ErrorAction Stop`,
+      ],
+      { stdio: "ignore", timeout: 5_000, windowsHide: true }
+    );
+  } catch (error) {
+    throw new Error(
+      "Source E2E could not stop the installed GameSentenceMiner primary: " +
+        (error instanceof Error ? error.message : String(error))
+    );
+  }
+
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const remaining = getInstalledGsmPids();
+    if (remaining.length === 0) {
+      return { requested: true, closedPids: initialPids };
+    }
+    await sleep(250);
+  }
+
+  throw new Error(
+    "Installed GameSentenceMiner.exe did not exit within " +
+      timeoutMs +
+      "ms after explicit source-test replacement request. Remaining PIDs: " +
+      getInstalledGsmPids().join(", ")
+  );
+}
+
 function restoreForeground(hwnd) {
   if (!hwnd) return;
   try {
@@ -163,6 +231,10 @@ const beforeBinding = before.existing?.bindings?.find(
     binding.pending === false &&
     Boolean(binding.sceneId)
 );
+
+const installedPrimaryReplacement = replaceInstalledPrimary
+  ? await replaceInstalledGsmPrimaryForSourceTest()
+  : { requested: false, closedPids: [] };
 
 const applyOutput = runNode("scripts/provision-apply.mjs", [
   ...forwarded,
@@ -257,7 +329,10 @@ while (Date.now() < deadline) {
                 resolver: before.resolver,
                 planned: before.planned,
               },
-              apply,
+              apply: {
+                ...apply,
+                installedPrimaryReplacement,
+              },
               provisioned: {
                 binding: completeBinding,
                 scenes: live.existing.boundScenes,
