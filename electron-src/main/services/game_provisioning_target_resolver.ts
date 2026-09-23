@@ -119,11 +119,44 @@ export function resolveForegroundCaptureTarget(
 
   const selection = executableMatches[0];
 
-  // PID is useful evidence about which process Playnite started, but it is not
-  // sufficient evidence that the foreground window is the actual game. A
-  // launcher/wrapper can briefly own the reported PID before handing off to a
-  // child process, so every new binding must still identify the requested game.
-  if (!optionBelongsToRequestedGame(request, selection)) {
+  const belongsToRequestedGame = optionBelongsToRequestedGame(
+    request,
+    selection
+  );
+  const selectedExecutable = optionExecutable(selection).toLocaleLowerCase();
+
+  // Exact PID + exact foreground/candidate executable is strong evidence for
+  // the current launch, even when Playnite's display name differs from the
+  // actual window title (localized titles, generic emulator windows, etc.).
+  // That evidence is deliberately launch-scoped: the discovered title/exe may
+  // be too generic to persist as a durable scene-switcher rule.
+  if (!belongsToRequestedGame && requestedPid !== undefined && !pidMismatch) {
+    if (
+      !foregroundExecutable ||
+      !selectedExecutable ||
+      selectedExecutable !== foregroundExecutable
+    ) {
+      return {
+        status: "not-ready",
+        reason:
+          "The foreground process matches the requested PID, but GSM could not verify the OBS capture target executable.",
+      };
+    }
+
+    return {
+      status: "resolved",
+      target: {
+        title: selection.title,
+        selection,
+        durableSwitcherSafe: false,
+      },
+    };
+  }
+
+  // Without exact-PID launch proof, retain the conservative identity rule.
+  // Launcher -> child fallback and no-PID paths must still tie the capture
+  // target to the requested game name before provisioning.
+  if (!belongsToRequestedGame) {
     return {
       status: "not-ready",
       reason:
@@ -137,7 +170,6 @@ export function resolveForegroundCaptureTarget(
 
   const requiresExecutableProof = requestedPid === undefined || pidMismatch;
   if (requiresExecutableProof) {
-    const selectedExecutable = optionExecutable(selection).toLocaleLowerCase();
     if (
       !foregroundExecutable ||
       !selectedExecutable ||
