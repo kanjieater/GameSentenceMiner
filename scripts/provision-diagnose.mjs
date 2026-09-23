@@ -2,7 +2,7 @@
 /**
  * Read-only live provisioning preflight.  This intentionally does not create
  * OBS probe inputs: it only queries the two existing Setup Capture helpers.
- * Run with: npm run provision:diagnose -- --name "Game" --external-id "playnite:<guid>" [--pid 123]
+ * Run with: npm run provision:diagnose -- --name "Game" --external-id "playnite:<guid>" [--pid 123] [--launch-kind emulator]
  */
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
@@ -24,9 +24,13 @@ function value(flag, required = true) {
 const displayName = value("--name");
 const externalId = value("--external-id");
 const pidValue = value("--pid", false);
+const launchKindValue = value("--launch-kind", false);
 const processId = pidValue ? Number(pidValue) : undefined;
 if (pidValue && (!Number.isInteger(processId) || processId <= 0)) {
   throw new Error("--pid must be a positive integer.");
+}
+if (launchKindValue !== undefined && launchKindValue !== "emulator") {
+  throw new Error('--launch-kind must be "emulator" when supplied.');
 }
 
 function getForegroundSnapshot() {
@@ -112,7 +116,13 @@ try {
 } catch (error) {
   obsResult = { options: [], errors: [error instanceof Error ? error.message : String(error)] };
 }
-const request = { displayName, externalId, ...(processId ? { processId } : {}), defaultMode: "ocr" };
+const request = {
+  displayName,
+  externalId,
+  ...(processId ? { processId } : {}),
+  ...(launchKindValue ? { launchKind: launchKindValue } : {}),
+  defaultMode: "ocr",
+};
 // This is the resolver configuration used after PR #10's exact-PID stability
 // gate. It still enforces PID equality, so launcher→child cases remain refused.
 const resolution = resolveForegroundCaptureTarget(request, foreground, obsResult.options, {
