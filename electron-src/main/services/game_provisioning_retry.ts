@@ -34,10 +34,7 @@ export async function ensureGameProvisionedWithRetry(
   );
   const launchScopedExactPidAfterAttempts = Math.max(
     0,
-    Math.min(
-      attempts - 1,
-      options.launchScopedExactPidAfterAttempts ?? 4
-    )
+    options.launchScopedExactPidAfterAttempts ?? 4
   );
   const wait =
     dependencies.wait ??
