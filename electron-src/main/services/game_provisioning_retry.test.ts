@@ -385,6 +385,92 @@ describe("game provisioning whole-operation retry", () => {
     expect(ensureAttempt).toHaveBeenCalledOnce();
   });
 
+  it("keeps observing a bound relaunch long enough to retain a transient multi-hop launcher", async () => {
+    let snapshot = 0;
+    const getProcessRelationships = vi.fn(async () => {
+      snapshot += 1;
+      if (snapshot === 1) {
+        return [
+          { pid: 4242, parentPid: 1, executableName: "root.exe" },
+        ];
+      }
+      if (snapshot === 2) {
+        return [
+          { pid: 4242, parentPid: 1, executableName: "root.exe" },
+          { pid: 5000, parentPid: 4242, executableName: "launcher.exe" },
+        ];
+      }
+      return [
+        { pid: 4242, parentPid: 1, executableName: "root.exe" },
+        { pid: 7777, parentPid: 5000, executableName: "pcsx2-qt.exe" },
+      ];
+    });
+    const foregrounds: ForegroundWindowSnapshot[] = [
+      {
+        ...foreground,
+        pid: 4242,
+        title: "Root Launcher",
+        executableName: "root.exe",
+      },
+      {
+        ...foreground,
+        pid: 4242,
+        title: "Root Launcher",
+        executableName: "root.exe",
+      },
+      {
+        ...foreground,
+        pid: 7777,
+        title: "_REALIZE -Panorama Luminary-",
+        executableName: "pcsx2-qt.exe",
+      },
+    ];
+    let foregroundIndex = 0;
+    const ensureAttempt = vi.fn(
+      async (
+        attemptRequest: GameProvisioningRequest
+      ): Promise<GameProvisioningResult> => {
+        foregroundIndex += 1;
+        if (foregroundIndex === 1) {
+          expect(attemptRequest.launchProcessIds).toEqual([4242]);
+        } else if (foregroundIndex === 2) {
+          expect(attemptRequest.launchProcessIds).toEqual([4242, 5000]);
+        } else {
+          expect(attemptRequest.launchProcessIds).toEqual([4242, 5000, 7777]);
+        }
+        return success;
+      }
+    );
+    const wait = vi.fn(async () => undefined);
+
+    const result = await ensureGameProvisionedWithRetry(
+      {
+        displayName: "Realize - Panorama Luminary",
+        processId: 4242,
+        externalId: "playnite:realize",
+      },
+      {
+        isSupported: () => true,
+        getForegroundSnapshot: () =>
+          foregrounds[Math.min(foregroundIndex, foregrounds.length - 1)],
+        getWindowOptions: async () => [],
+        getProcessRelationships,
+        ensureAttempt,
+        wait,
+      },
+      {
+        attempts: 3,
+        delayMs: 1,
+        boundLaunchObservationAttempts: 3,
+      }
+    );
+
+    expect(result.status).toBe("already-configured");
+    expect(getProcessRelationships).toHaveBeenCalledTimes(3);
+    expect(ensureAttempt).toHaveBeenCalledTimes(3);
+    expect(wait).toHaveBeenCalledTimes(2);
+  });
+
   it("uses PID strictly first, then safely falls back after launcher handoff", async () => {
     const ensureAttempt = vi.fn(
       async (
