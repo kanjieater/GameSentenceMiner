@@ -189,7 +189,7 @@ describe("game provisioning whole-operation retry", () => {
     expect(getWindowOptions).toHaveBeenCalledTimes(2);
   });
 
-  it("waits before allowing launch-scoped exact-PID identity", async () => {
+  it("waits through the generic handoff grace before trusting the launch root", async () => {
     const genericForeground: ForegroundWindowSnapshot = {
       ...foreground,
       title: "RetroArch SwanStation 1.0.0 4d309c0",
@@ -220,63 +220,10 @@ describe("game provisioning whole-operation retry", () => {
         resolutions.push(resolution.status);
         if (resolution.status === "resolved") {
           expect(resolution.target.durableSwitcherSafe).toBe(false);
+          expect(resolution.target.launchProcessId).toBe(4242);
           return success;
         }
         return { status: "target-not-ready", reason: resolution.reason };
-      }
-    );
-
-    const result = await ensureGameProvisionedWithRetry(
-      {
-        displayName: "Arc the Lad II",
-        processId: 4242,
-        launchKind: "emulator",
-      },
-      {
-        isSupported: () => true,
-        getForegroundSnapshot: () => genericForeground,
-        getWindowOptions: async () => [genericOption],
-        ensureAttempt,
-        wait: async () => undefined,
-      },
-      {
-        attempts: 2,
-        delayMs: 1,
-        launchScopedExactPidAfterAttempts: 1,
-      }
-    );
-
-    expect(result.status).toBe("already-configured");
-    expect(resolutions).toEqual(["not-ready", "resolved"]);
-  });
-
-  it("does not enable launch-scoped exact-PID identity without emulator context", async () => {
-    const genericForeground: ForegroundWindowSnapshot = {
-      ...foreground,
-      title: "Generic Launcher",
-      executableName: "launcher.exe",
-    };
-    const genericOption: ObsWindowOption = {
-      title: "Generic Launcher",
-      suggestedSceneName: "Generic Launcher",
-      value: "Generic Launcher:Launcher:launcher.exe",
-      targetKind: "window",
-      captureValues: {
-        window_capture: "Generic Launcher:Launcher:launcher.exe",
-      },
-    };
-    const ensureAttempt = vi.fn(
-      async (
-        _request: GameProvisioningRequest,
-        resolver: GameCaptureTargetResolver
-      ): Promise<GameProvisioningResult> => {
-        const resolution = await resolver({
-          displayName: "Arc the Lad II",
-          processId: 4242,
-        });
-        return resolution.status === "resolved"
-          ? success
-          : { status: "target-not-ready", reason: resolution.reason };
       }
     );
 
@@ -290,14 +237,71 @@ describe("game provisioning whole-operation retry", () => {
         wait: async () => undefined,
       },
       {
-        attempts: 6,
-        delayMs: 0,
-        launchScopedExactPidAfterAttempts: 1,
+        attempts: 2,
+        delayMs: 1,
+        launchOwnershipDelayAttempts: 1,
       }
     );
 
-    expect(result.status).toBe("target-not-ready");
-    expect(ensureAttempt).toHaveBeenCalledTimes(6);
+    expect(result.status).toBe("already-configured");
+    expect(resolutions).toEqual(["not-ready", "resolved"]);
+  });
+
+  it("proves a launcher child from parent PID even after the root exits", async () => {
+    const childForeground: ForegroundWindowSnapshot = {
+      ...foreground,
+      pid: 7777,
+      title: "Untranslated Child Window",
+      executableName: "game.exe",
+    };
+    const childOption: ObsWindowOption = {
+      title: childForeground.title,
+      suggestedSceneName: childForeground.title,
+      value: "Untranslated Child Window:GameWindow:game.exe",
+      targetKind: "window",
+      captureValues: {
+        window_capture: "Untranslated Child Window:GameWindow:game.exe",
+      },
+    };
+    const ensureAttempt = vi.fn(
+      async (
+        _request: GameProvisioningRequest,
+        resolver: GameCaptureTargetResolver
+      ): Promise<GameProvisioningResult> => {
+        const resolution = await resolver({
+          displayName: "Different Playnite Name",
+          processId: 4242,
+        });
+        if (resolution.status === "resolved") {
+          expect(resolution.target.launchProcessId).toBe(7777);
+          expect(resolution.target.durableSwitcherSafe).toBe(false);
+          return success;
+        }
+        return { status: "target-not-ready", reason: resolution.reason };
+      }
+    );
+
+    const result = await ensureGameProvisionedWithRetry(
+      { displayName: "Different Playnite Name", processId: 4242 },
+      {
+        isSupported: () => true,
+        getForegroundSnapshot: () => childForeground,
+        getWindowOptions: async () => [childOption],
+        getProcessRelationships: async () => [
+          { pid: 7777, parentPid: 4242 },
+        ],
+        ensureAttempt,
+        wait: async () => undefined,
+      },
+      {
+        attempts: 1,
+        delayMs: 0,
+        launchOwnershipDelayAttempts: 0,
+      }
+    );
+
+    expect(result.status).toBe("already-configured");
+    expect(ensureAttempt).toHaveBeenCalledOnce();
   });
 
   it("uses PID strictly first, then safely falls back after launcher handoff", async () => {
