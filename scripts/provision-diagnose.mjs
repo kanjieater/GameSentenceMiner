@@ -35,11 +35,28 @@ function getForegroundSnapshot() {
   // Match GSM's Windows hook: GetWindowTextW provides a UTF-16 window title.
   // Output UTF-8 JSON so Node never has to decode a console code page.
   const command = `$OutputEncoding=[Console]::OutputEncoding=[Text.UTF8Encoding]::new($false); Add-Type @'\nusing System; using System.Text; using System.Runtime.InteropServices;\npublic static class ForegroundProbe {\n [DllImport(\"user32.dll\")] public static extern IntPtr GetForegroundWindow();\n [DllImport(\"user32.dll\", EntryPoint=\"GetWindowTextW\", CharSet=CharSet.Unicode)] public static extern int GetWindowTextW(IntPtr hWnd, StringBuilder text, int count);\n [DllImport(\"user32.dll\")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint pid);\n}\n'@; $h=[ForegroundProbe]::GetForegroundWindow(); $windowPid=0; [void][ForegroundProbe]::GetWindowThreadProcessId($h,[ref]$windowPid); $b=New-Object Text.StringBuilder 4096; [void][ForegroundProbe]::GetWindowTextW($h,$b,$b.Capacity); $p=Get-Process -Id $windowPid -ErrorAction SilentlyContinue; [pscustomobject]@{hwnd=$h.ToInt64().ToString();pid=[int]$windowPid;title=$b.ToString();executablePath=if($p){$p.Path}else{''};executableName=if($p){$p.ProcessName+'.exe'}else{''};capturedAt=[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds();sequence=1} | ConvertTo-Json -Compress`;
-  return JSON.parse(execFileSync("powershell", ["-NoLogo", "-NoProfile", "-Command", command], { encoding: "utf8" }).trim());
+  return JSON.parse(
+    execFileSync(
+      "powershell.exe",
+      ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", command],
+      { encoding: "utf8", timeout: 5_000, windowsHide: true }
+    ).trim()
+  );
 }
 
 function readJson(file) {
   return JSON.parse(fs.readFileSync(file, "utf8"));
+}
+
+function withTimeout(promise, milliseconds, label) {
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(
+      () => reject(new Error(`${label} timed out after ${milliseconds}ms`)),
+      milliseconds
+    );
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
 }
 
 function parseObsValue(raw) {
@@ -61,7 +78,14 @@ async function getObsWindowOptions(dataDir) {
     const config = readJson(configPath);
     const candidate = new OBSWebSocket();
     try {
-      await candidate.connect(`ws://${config.server_ip || "127.0.0.1"}:${config.server_port}`, config.server_password || "");
+      await withTimeout(
+        candidate.connect(
+          `ws://${config.server_ip || "127.0.0.1"}:${config.server_port}`,
+          config.server_password || ""
+        ),
+        4_000,
+        "OBS websocket connect"
+      );
       obs = candidate;
       break;
     } catch (error) {
@@ -75,7 +99,14 @@ async function getObsWindowOptions(dataDir) {
       ["game_window_getter", "game_capture"],
     ].map(async ([inputName, kind]) => {
       try {
-        const response = await obs.call("GetInputPropertiesListPropertyItems", { inputName, propertyName: "window" });
+        const response = await withTimeout(
+          obs.call("GetInputPropertiesListPropertyItems", {
+            inputName,
+            propertyName: "window",
+          }),
+          4_000,
+          `OBS ${inputName} candidate query`
+        );
         return (response.propertyItems || []).map((item) => ({ kind, item }));
       } catch (error) {
         return [{ kind, error: error instanceof Error ? error.message : String(error) }];
@@ -97,8 +128,8 @@ async function getObsWindowOptions(dataDir) {
       suggestedSceneName: option.title,
     }));
     const [collectionInfo, sceneInfo] = await Promise.all([
-      obs.call("GetSceneCollectionList").catch(() => null),
-      obs.call("GetSceneList").catch(() => null),
+      withTimeout(obs.call("GetSceneCollectionList"), 4_000, "OBS collection query").catch(() => null),
+      withTimeout(obs.call("GetSceneList"), 4_000, "OBS scene query").catch(() => null),
     ]);
     return {
       options,
