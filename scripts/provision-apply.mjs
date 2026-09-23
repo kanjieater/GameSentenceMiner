@@ -59,7 +59,7 @@ const installedGsm = execFileSync(
     "-Command",
     "(Get-Process GameSentenceMiner -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty Id)",
   ],
-  { encoding: "utf8" }
+  { encoding: "utf8", timeout: 5_000, windowsHide: true }
 ).trim();
 if (installedGsm) {
   throw new Error(
