@@ -1003,6 +1003,38 @@ def test_obs_screenshot_thread_falls_back_to_global_preprocess(monkeypatch):
     assert thread.get_capture_preprocess_mode() == "grayscale"
 
 
+def test_obs_screenshot_thread_rescales_scene_config_when_preprocess_changes_frame_size():
+    calls = []
+    config = SimpleNamespace(
+        rectangles=[],
+        obs_capture_preprocess="crt_scanlines",
+        scale_to_custom_size=lambda width, height: calls.append((width, height)),
+    )
+    thread = run_module.OBSScreenshotThread(config, screen_capture_on_combo=False)
+    thread.width = 2880
+    thread.height = 1620
+
+    thread.sync_ocr_config_to_capture_size(1920, 1080)
+
+    assert calls == [(1920, 1080)]
+
+
+def test_obs_screenshot_thread_skips_rescale_when_frame_size_is_unchanged():
+    calls = []
+    config = SimpleNamespace(
+        rectangles=[],
+        obs_capture_preprocess=None,
+        scale_to_custom_size=lambda width, height: calls.append((width, height)),
+    )
+    thread = run_module.OBSScreenshotThread(config, screen_capture_on_combo=False)
+    thread.width = 1920
+    thread.height = 1080
+
+    thread.sync_ocr_config_to_capture_size(1920, 1080)
+
+    assert calls == []
+
+
 def test_apply_ipc_config_reload_refreshes_hotkeys_and_clipboard_toggle(monkeypatch):
     events = []
 
