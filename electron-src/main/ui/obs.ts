@@ -2114,7 +2114,10 @@ async function isOBSHealthy(): Promise<boolean> {
 }
 
 // Shared scene creation logic
-export async function createSceneWithCapture(window: ObsSceneCaptureWindowSelection): Promise<void> {
+export async function createSceneWithCapture(
+    window: ObsSceneCaptureWindowSelection,
+    options: { persistWindowSceneRule?: boolean } = {}
+): Promise<void> {
     if (!isWindows() && !isLinux()) {
         throw new Error(
             'Automatic OBS capture setup is currently only supported on Windows and Linux XComposite or PipeWire.'
@@ -2240,7 +2243,7 @@ export async function createSceneWithCapture(window: ObsSceneCaptureWindowSelect
         }
     }
 
-    if (sceneInfo.switcherRegex) {
+    if (sceneInfo.switcherRegex && options.persistWindowSceneRule !== false) {
         const collectionName = await getCurrentOBSSceneCollectionName();
         const captureWindowValue =
             window.captureValues?.game_capture ??
