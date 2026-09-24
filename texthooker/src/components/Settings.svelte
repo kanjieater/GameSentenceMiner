@@ -744,7 +744,7 @@
 	<input class="hidden" type="file" bind:this={settingsFileInput} on:change={handleSettingsFileChange} />
 	<input class="hidden" type="file" bind:this={presetFileInput} on:change={handlePresetFileChange} />
 	<div
-		class="flex flex-col max-[800px]:w-[90vw] min-[800px]:grid grid-cols-[max-content,auto,max-content,auto] gap-3 absolute overflow-auto h-[90vh] top-11 z-50 py-4 pr-8 pl-4 border bg-base-200 overscroll-contain"
+		class="settings-panel flex flex-col max-[800px]:w-[90vw] min-[800px]:grid grid-cols-[max-content,auto,max-content,auto] gap-3 absolute overflow-auto h-[90vh] top-11 z-50 py-4 pr-8 pl-4 border bg-base-200 overscroll-contain"
 		use:clickOutside={handleSettingsClick}
 	>
 		<div class="mb-2" style="grid-column: 1/5;">
@@ -1159,3 +1159,47 @@
 		/>
 	</div>
 {/if}
+
+<style>
+	/* Match the mobile controls used by gsm-stream without changing the desktop layout. */
+	@media (max-width: 799px) {
+		.settings-panel {
+			font-size: 1rem;
+		}
+
+		.settings-panel :global(button),
+		.settings-panel :global([role='button']),
+		.settings-panel :global(summary),
+		.settings-panel :global(.btn),
+		.settings-panel :global(.btn-sm),
+		.settings-panel :global(.btn-xs) {
+			min-height: 44px;
+			min-width: 44px;
+		}
+
+		.settings-panel :global(button),
+		.settings-panel :global(.btn) {
+			padding: 0 1rem;
+			font-size: 1rem;
+		}
+
+		.settings-panel :global(.btn-sm),
+		.settings-panel :global(.btn-xs) {
+			padding: 0 0.75rem;
+			font-size: 0.95rem;
+		}
+
+		.settings-panel :global(input:not([type='checkbox']):not(.hidden)),
+		.settings-panel :global(select),
+		.settings-panel :global(textarea) {
+			min-height: 44px;
+			font-size: 1rem;
+		}
+
+		/* The checkbox itself is the tap target for these paired settings labels. */
+		.settings-panel :global(input[type='checkbox']) {
+			min-height: 44px;
+			min-width: 44px;
+		}
+	}
+</style>
